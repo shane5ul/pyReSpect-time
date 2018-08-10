@@ -18,17 +18,6 @@
 
 
 #
-# NOTES TO SELF
-#
-#
-# L matrix - use extra rows to make the ends go to zero?
-#
-# get G*(w) to work as well; perhaps subsume common into main program for easy distribution or keep separate?
-# look at comments all over again.
-#
-
-
-#
 # Imports
 #
 import numpy as np
@@ -63,7 +52,7 @@ rcParams['ytick.labelsize'] = 20
 rcParams['legend.fontsize'] = 20
 rcParams['lines.linewidth'] = 2
 
-
+# HELPER FUNCTIONS
 
 def InitializeH(Gexp, s, kernMat):
 	"""
@@ -203,7 +192,6 @@ def residualLM(H, lam, Gexp, kernMat):
 	
 	return r
 		
-
 def jacobianLM(H, lam, Gexp, kernMat):
 	"""
 	 HELPER FUNCTION for optimization: Get Jacobian J
@@ -233,7 +221,6 @@ def jacobianLM(H, lam, Gexp, kernMat):
 
 	return	Jr
 
-
 def kernelD(H, kernMat):
 	"""
 	 Function: kernelD(input)
@@ -254,10 +241,7 @@ def kernelD(H, kernMat):
 	DK      = kernMat  * Hsuper
 		
 	return DK
-
-
 	
-
 def getContSpec(par):
 	"""
 	This is the main driver routine for computing the continuous spectrum
@@ -396,51 +380,49 @@ def getContSpec(par):
 		
 	return H, lamC
 
-# Furnish Globals that you will need for interactive plot
 def guiFurnishGlobals(par):
+	"""Furnish Globals to accelerate interactive plot in jupyter notebooks"""
+	from matplotlib import rcParams
 
-    from matplotlib import rcParams
+	# experimental data
+	t, Gexp = common.GetExpData(par['GexpFile'])
+	n    = len(t)
+	ns   = par['ns']    # discretization of 'tau'
+
+	tmin = t[0];
+	tmax = t[n-1];
+
+	# determine frequency window
+	if par['FreqEnd'] == 1:
+		smin = np.exp(-np.pi/2) * tmin; smax = np.exp(np.pi/2) * tmax		
+	elif par['FreqEnd'] == 2:
+		smin = tmin; smax = tmax
+	elif par['FreqEnd'] == 3:
+		smin = np.exp(+np.pi/2) * tmin; smax = np.exp(-np.pi/2) * tmax		
+
+	hs   = (smax/smin)**(1./(ns-1))
+	s    = smin * hs**np.arange(ns)
+	kernMat = common.getKernMat(s,t)
+
+	# toggle flags to prevent printing
+
+	par['verbose'] = False
+	par['plotting'] = False
+
+	# load lamda, rho, eta
+	lam, rho, eta = np.loadtxt('output/rho-eta.dat', unpack=True)
+
+	# plot settings
+	rcParams['axes.labelsize'] = 14 
+	rcParams['xtick.labelsize'] = 12
+	rcParams['ytick.labelsize'] = 12 
+	rcParams['legend.fontsize'] = 12
+	rcParams['lines.linewidth'] = 2
+
+	plt.clf()
+
+	return s, t, kernMat, Gexp, par, lam, rho, eta
     
-    # experimental data
-    t, Gexp = common.GetExpData(par['GexpFile'])
-    n    = len(t)
-    ns   = par['ns']    # discretization of 'tau'
-
-    tmin = t[0];
-    tmax = t[n-1];
-
-    # determine frequency window
-    if par['FreqEnd'] == 1:
-        smin = np.exp(-np.pi/2) * tmin; smax = np.exp(np.pi/2) * tmax		
-    elif par['FreqEnd'] == 2:
-        smin = tmin; smax = tmax
-    elif par['FreqEnd'] == 3:
-        smin = np.exp(+np.pi/2) * tmin; smax = np.exp(-np.pi/2) * tmax		
-
-    hs   = (smax/smin)**(1./(ns-1))
-    s    = smin * hs**np.arange(ns)
-    kernMat = common.getKernMat(s,t)
-    
-    # toggle flags to prevent printing
-    
-    par['verbose'] = False
-    par['plotting'] = False
-
-    # load lamda, rho, eta
-    lam, rho, eta = np.loadtxt('output/rho-eta.dat', unpack=True)
-    
-    # plot settings
-    rcParams['axes.labelsize'] = 14 
-    rcParams['xtick.labelsize'] = 12
-    rcParams['ytick.labelsize'] = 12 
-    rcParams['legend.fontsize'] = 12
-    rcParams['lines.linewidth'] = 2
-
-    plt.clf()
-    
-    return s, t, kernMat, Gexp, par, lam, rho, eta
-    
-
 #	 
 # Main Driver: This part is not run when contSpec.py is imported as a module
 #              For example as part of GUI

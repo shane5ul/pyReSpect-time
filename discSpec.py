@@ -382,6 +382,26 @@ def ReadData(par):
 
 	return t, Gexp, s, H
 
+def guiFurnishGlobals(par):
+	"""Globals for Smoother operation of Jupyter Notebook"""
+	# toggle flags to prevent printing    
+	par['verbose'] = False
+	par['plotting'] = False
+
+	# Read experimental data
+	t, Gexp = common.GetExpData(par['GexpFile'])
+
+	# Read continuous spectrum
+	s, H    = np.loadtxt('output/H.dat', unpack=True)    
+
+	# Read continuous fit
+	_, Gfitc = np.loadtxt('output/Gfit.dat', unpack=True)    
+
+	wt  = GetWeights(H, t, s)
+	wt  = wt/np.trapz(wt, np.log(s))
+
+	return s, H, t, Gexp, Gfitc, wt
+
 #############################
 #
 # M A I N  P R O G R A M
