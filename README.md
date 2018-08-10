@@ -1,6 +1,6 @@
 # pyReSpect-time
 
-Extract continuous and discrete relaxation spectra from G(t)
+Extract continuous and discrete relaxation spectra from stress relaxation modulus G(t)
 
 ## Files
 
