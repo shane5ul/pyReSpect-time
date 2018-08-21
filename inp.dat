@@ -27,7 +27,7 @@ plotting  	: True
 # Number of grid points to represent the continuous spectrum (typical 50-100)
 #
 
-ns			: 50
+ns			: 100
 
 #
 # Specify lambda_C instead of using the one inferred from the L-curve
@@ -51,7 +51,7 @@ SmFacLam 	: 0
 # It should contain G*(w) in 3 columns [w Gp Gpp]
 #
 
-GexpFile 	: 'tests/test3.dat'
+GexpFile 	: 'tests/Gte.dat'
 
 #
 # Treatment of frequency window ends:
@@ -71,7 +71,6 @@ FreqEnd 	: 1
 # Specify number of discrete modes (>0). If set equal to zero, then 
 # determine automatically, using internal algorithm
 #
-
 Nopt 		: 0
 
 # Parameter controls spacing of tau_i 
