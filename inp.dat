@@ -66,11 +66,21 @@ FreqEnd 	: 1
 #====================================#
 # D I S C R E T E    S P E C T R U M #
 #====================================#
+
+#
+# Auto-magically determine the number and placement of discrete modes
+# If this flag is True, none of the paramters that follow
+# (Nopt, BaseDistWt, or condWt) are used.
+#
+
+magic 		: True
+
 				
 #
 # Specify number of discrete modes (>0). If set equal to zero, then 
 # determine automatically, using internal algorithm
 #
+
 Nopt 		: 0
 
 # Parameter controls spacing of tau_i 

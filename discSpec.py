@@ -1,5 +1,7 @@
 #
-# 8/6/2018: 
+# 8/21/2018: 
+#
+# (*) AutoMagic Mode: need only par verbose and plotting flags; auto Nopt
 # (*) switching to nnls as default fitting engine
 # (*) changed older MaxwellModes and LLS -> nnls
 # (*) some printing modifications
@@ -40,7 +42,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
-from scipy.integrate import cumtrapz
+from scipy.integrate import cumtrapz, quad
+from scipy.optimize import minimize
+
 
 import os
 import time
@@ -368,6 +372,211 @@ def getDiscSpec(par):
 
 	return Nopt, g, tau, error
 
+def normKern(t, gn, taun, g1, tau1, g2, tau2):
+	"""helper function: for costFcn and mergeModes"""
+	Gn = gn * np.exp(-t/taun)
+	Go = g1 * np.exp(-t/tau1) + g2 * np.exp(-t/tau2)
+	return (Gn/Go - 1.)**2
+
+def costFcn(par, g, tau, imode):
+	""""helper function for mergeModes; establishes cost function to minimize"""
+	gn   = par[0]
+	taun = par[1]
+
+	g1   = g[imode]
+	g2   = g[imode+1]
+	tau1 = tau[imode]
+	tau2 = tau[imode+1]
+
+	tmin = min(tau1, tau2)/10.
+	tmax = max(tau1, tau2)*10.
+
+	return quad(normKern, tmin, tmax, args=(gn, taun, g1, tau1, g2, tau2))[0]
+
+def mergeModes(g, tau, imode):
+	"""merge modes imode and imode+1 into a single mode
+	   return gp and taup corresponding to this new mode"""
+	from scipy.integrate import quad
+	from scipy.optimize import minimize	
+
+	iniGuess = [g[imode] + g[imode+1], 0.5*(tau[imode] + tau[imode+1])]
+	res = minimize(costFcn, iniGuess, args=(g, tau, imode))
+
+	newtau        = np.delete(tau, imode+1)
+	newtau[imode] = res.x[1]
+
+	newg          = np.delete(g, imode+1)
+	newg[imode]   = res.x[0]
+		
+	return newg, newtau
+	
+def getDiscSpecMagic(par):
+
+	# read input; initialize parameters
+	if par['verbose']:
+		print('\n(*) Start\n(*) Loading Data Files: ... {}...'.format(par['GexpFile']))
+
+	t, Gexp, s, H = ReadData(par)
+
+	n   = len(t);
+	ns  = len(s);
+
+	# range of N scanned
+	Nmax  = min(np.floor(3.0 * np.log10(max(t)/min(t))),n/4); # maximum Nopt
+	Nmin  = max(np.floor(0.5 * np.log10(max(t)/min(t))),3);   # minimum Nopt
+	Nv    = np.arange(Nmin, Nmax + 1).astype(int)
+	npts  = len(Nv)
+
+	# range of wtBaseDist scanned
+	wtBase = 0.05 * np.arange(1, 20)
+	AICbst = np.zeros(len(wtBase))
+	Nbst   = np.zeros(len(wtBase))
+	nzNbst = np.zeros(len(wtBase))  # number of nonzeros
+
+	# Estimate Error Weight from Continuous Curve Fit
+	kernMat = common.getKernMat(s,t)
+	Gc      = common.kernel_prestore(H, kernMat);
+	kernMat = None # clear from memory
+	Cerror  = 1./(np.std(Gc/Gexp - 1.))  #	Cerror = 1.?
+	
+	# main loop over wtBaseDist
+	for ib, wb in enumerate(wtBase):
+		
+		#
+		# Find the distribution of nodes you need
+		#
+
+		wt  = GetWeights(H, t, s)
+		wt  = wt/np.trapz(wt, np.log(s))
+		wt  = (1. - wb) * wt + (wb * np.mean(wt)) * np.ones(len(wt))
+
+		# 
+		# Scan the range of number of Maxwell modes N = (Nmin, Nmax) 
+		#
+		ev    = np.zeros(npts)
+		condN = np.zeros(npts)
+		nzNv  = np.zeros(npts)  # number of nonzero modes 
+
+		for i in np.arange(npts):
+			N      = Nv[i]
+			z, hz  = GridDensity(np.log(s), wt, N)     # Select "tau" Points
+			
+			# Get g_i
+			g, tau, ev[i], condN[i] = MaxwellModes(z, t, Gexp)
+			nzNv[i]                 = len(g)
+
+		# store the best solution for this particular wb
+		condn      = np.log10(condN) < 10.
+		AIC        = 2. * Nv + 2. * Cerror * ev
+		
+#		Nbst[ib]   = Nv[np.argmin(AIC[condn])]
+		AICbst[ib] = min(AIC)
+		Nbst[ib]   = Nv[np.argmin(AIC)]
+		nzNbst[ib] = nzNv[np.argmin(AIC)]
+		
+	# global best settings of wb and Nopt; note this is nominal Nopt (!= len(g) due to NNLS)
+	
+	Nopt  = int(Nbst[np.argmin(AICbst)])
+	wbopt = wtBase[np.argmin(AICbst)]
+
+	#
+	# Recompute the best data-set stats
+	#
+	wt  = GetWeights(H, t, s)
+	wt  = wt/np.trapz(wt, np.log(s))
+	wt  = (1. - wbopt) * wt + (wbopt * np.mean(wt)) * np.ones(len(wt))	
+	
+	z, hz              = GridDensity(np.log(s), wt, Nopt)           # Select "tau" Points
+	g, tau, error, cKp = MaxwellModes(z, t, Gexp)   # Get g_i, taui
+
+	#
+	# Check if modes are close enough to merge
+	#
+	while True:
+		tauSpacing = tau[1:]/tau[:-1]
+
+		if min(tauSpacing) < 1.5:                      # arbitrary limit
+			imode         = np.argmin(tauSpacing)      # merge modes imode and imode + 1
+			g, tau        = mergeModes(g, tau, imode)
+		else:
+			break
+
+
+	print(min(tauSpacing))
+	
+	if par['verbose']:
+		print('\n(*) Number of optimum nodes = {0:d}\n'.format(len(g)))
+
+	#
+	# Some Plotting
+	#
+
+	if par['plotting']:
+
+		plt.clf()
+		plt.plot(wtBase, AICbst, label='AIC')
+		plt.plot(wtBase, nzNbst, label='Nbst')
+		plt.scatter(wbopt, len(g), color='k')
+		plt.scatter(wbopt, np.min(AICbst), color='k')
+		plt.yscale('log')
+		plt.xlabel('baseDistWt')
+		plt.legend()
+		plt.tight_layout()
+		plt.savefig('output/AIC.pdf')		
+
+
+		plt.clf()
+		plt.loglog(tau,g,'o-', label='disc')
+		plt.loglog(s, np.exp(H), label='cont')
+		plt.xlabel('tau')
+		plt.ylabel('g')
+		plt.legend(loc='lower right')
+		plt.tight_layout()
+		plt.savefig('output/dmodes.pdf')		
+
+
+		plt.clf()
+		S, T    = np.meshgrid(tau, t)
+		K		= np.exp(-T/S)		# n * nmodes			
+		GtM   	= np.dot(K, g)
+		plt.loglog(t,Gexp,'o')
+		plt.loglog(t,GtM, label='disc')	
+		
+
+		plt.loglog(t, Gc, '--', label='cont')
+		plt.xlabel('t')
+		plt.ylabel('G(t)')
+		plt.legend()
+		plt.tight_layout()
+		plt.savefig('output/Gfitd.pdf')
+  
+	#
+	# Some Printing
+	#
+
+	if par['verbose']:
+
+		print('(*) log10(Condition number) of matrix equation: {0:.2f}\n'.format(np.log10(cKp)))
+
+		print('\n\t\tModes\n\t\t-----\n\n')
+		print('i \t    g(i) \t    tau(i)\n')
+		print('---------------------------------------\n')
+		
+		for i in range(len(g)):
+			print('{0:3d} \t {1:.5e} \t {2:.5e}'.format(i+1,g[i],tau[i]))
+		print("\n")
+
+		np.savetxt('output/dmodes.dat', np.c_[g, tau], fmt='%e')
+		np.savetxt('output/aic.dat', np.c_[wtBase, nzNbst, AICbst], fmt='%f\t%i\t%e')
+
+		S, T    = np.meshgrid(tau, t)
+		K		= np.exp(-T/S)		# n * nmodes			
+		GtM   	= np.dot(K, g)
+		np.savetxt('output/Gfitd.dat', np.c_[t, GtM], fmt='%e')
+
+
+	return Nopt, g, tau, error
+
 def ReadData(par):
 	"""
 		Read experimental data, and the continuous spectrum
@@ -413,4 +622,8 @@ if __name__ == '__main__':
 	# Read input parameters from file "inp.dat"
 	#
 	par = common.readInput('inp.dat')
-	_ = getDiscSpec(par)
+	if par['magic']:
+		_ = getDiscSpecMagic(par)
+	else:
+		_ = getDiscSpec(par)
+		
