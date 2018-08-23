@@ -80,17 +80,13 @@ def InitializeH(Gexp, s, kernMat):
 	
 	return H
 
-def lcurve(Gexp, Hgs, SmoothFac, kernMat):
+def lcurve(Gexp, Hgs, kernMat, par):
 	""" 
 	 Function: lcurve(input)
 	
-	 Input: Gexp = n*1 vector [Gt],
-	        Hgs  = guessed H,
-	
-	        SmoothFac = Indirect way of controlling lambda_C, Set between -1 
-	                   (lowest lambda explored) and 1 (highest lambda explored);
-	                    When set to 0, using lambda_C determined from the L-curve
-		   kernMat = matrix for faster kernel evaluation
+	 Input: Gexp    = n*1 vector [Gt],
+	        Hgs     = guessed H,
+		    kernMat = matrix for faster kernel evaluation
 
 	 Output: lamC and 3 vectors of size npoints*1 contains a range of lambda, rho
 	         and eta. "Elbow"  = lamC is estimated using a *NEW* heuristic.
@@ -98,8 +94,10 @@ def lcurve(Gexp, Hgs, SmoothFac, kernMat):
 	"""
 	
 	# take a coarse mesh: 2 lambda's per decade (auto)
-	lam_min  = 1e-10
-	lam_max  = 1e+1
+	lam_max   = par['lam_max']
+	lam_min   = par['lam_min']
+	SmoothFac = par['SmFacLam']	
+
 	npoints  = int(2 * (np.log10(lam_max) - np.log10(lam_min)))
 
 	hlam    = (lam_max/lam_min)**(1./(npoints-1.))	
@@ -295,7 +293,7 @@ def getContSpec(par):
 	# Find Optimum Lambda with 'lcurve'
 	#
 	if par['lamC'] == 0:
-		lamC, lam, rho, eta = lcurve(Gexp, Hgs, par['SmFacLam'], kernMat)
+		lamC, lam, rho, eta = lcurve(Gexp, Hgs, kernMat, par)
 	else:
 		lamC = par['lamC']
 

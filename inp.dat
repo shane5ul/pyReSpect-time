@@ -6,22 +6,23 @@
 # (*) Change the flag on the RHS as appropriate
 #
 
+
 #========================================#
-# C O N T I N U O U S   S P E C T R U M  #
+#    COMMON SETTINGS                     #
 #========================================#
 
-
-#
 # Printing to screen and files in output/ is on/off (True/False)
 #
-
 verbose   	: True
 
 #
 # Plotting to file in output/ on/off (True/False)
 #
-
 plotting  	: True
+
+#========================================#
+# C O N T I N U O U S   S P E C T R U M  #
+#========================================#
 
 #
 # Number of grid points to represent the continuous spectrum (typical 50-100)
@@ -63,44 +64,22 @@ GexpFile 	: 'tests/Gte.dat'
 
 FreqEnd 	: 1
 
-#====================================#
-# D I S C R E T E    S P E C T R U M #
-#====================================#
+
+#========================================#
+#    FINE TUNE SETTINGS                  #
+#========================================#
 
 #
-# Auto-magically determine the number and placement of discrete modes
-# If this flag is True, none of the paramters that follow
-# (Nopt, BaseDistWt, or condWt) are used.
-#
-
-magic 		: True
-
-				
-#
-# Specify number of discrete modes (>0). If set equal to zero, then 
-# determine automatically, using internal algorithm
-#
-
-Nopt 		: 0
-
-# Parameter controls spacing of tau_i 
-#            = 0 => completely determined by H(tau)
-#            = 1 => tau_i are equispaced
-#
-# Set between 0 and 1. 
-#
-
-BaseDistWt 	: 0.5
-
+# contSpec: lcurve calculation, limits of lambda explored
+#           can look at the rho v/s eta plot to see if this needs to be widened.
+lam_min     : 1e-10
+lam_max     : 1e+1
 
 #
-# Parameter controls relative importance of error and conditioning in
-# determining Nopt (operative only if par.Nopt = 0, else it is irrelevant)
-#
-#            = 0 => completely determined by error
-#            = 1 => completely determined by condition number
-#
-# Set between 0 and 1
-#
+# discSpec: how finely to sample BaseWeightDist
+#           smaller value increases cost; typical range 0.02 - 0.2
+deltaBaseWeightDist : 0.05
 
-condWt     	: 0.5
+# discSpec: how close do successive modes (tau2/tau1) have to be before we 
+#           try to mege them
+minTauSpacing       : 1.75

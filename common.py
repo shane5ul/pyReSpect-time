@@ -26,16 +26,16 @@ def readInput(fname='inp.dat'):
 
 			par[key] = val
 
-	#
-	# Check Consistency of Input Parameters
-	#	
-	if par['BaseDistWt'] < 0. or par['BaseDistWt'] > 1. :
-		raise ValueError('The input parameter BaseDistWt needs to be between 0 and 1')
+	#~ #
+	#~ # Check Consistency of Input Parameters
+	#~ #	
+	#~ if par['BaseDistWt'] < 0. or par['BaseDistWt'] > 1. :
+		#~ raise ValueError('The input parameter BaseDistWt needs to be between 0 and 1')
   
-	elif par['condWt'] < 0. or par['condWt'] > 1.:
-		raise ValueError('The input parameter condWt needs to be between 0 and 1')
-	else:
-		print('Input parameters look OK ...')			
+	#~ elif par['condWt'] < 0. or par['condWt'] > 1.:
+		#~ raise ValueError('The input parameter condWt needs to be between 0 and 1')
+	#~ else:
+		#~ print('Input parameters look OK ...')			
 			
 			
 	return par
