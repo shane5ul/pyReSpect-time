@@ -33,25 +33,10 @@
 #         Gfitd.dat  : The discrete G* for Nopt [w Gp Gpp] 
 #
 
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.interpolate import interp1d
-from scipy.integrate import cumtrapz, quad
-from scipy.optimize import minimize
 
 
-import os
-import time
-import common
 
-plt.style.use('ggplot')		
-
-#~ from matplotlib import rcParams
-#~ rcParams['axes.labelsize'] = 28 
-#~ rcParams['xtick.labelsize'] = 20
-#~ rcParams['ytick.labelsize'] = 20 
-#~ rcParams['legend.fontsize'] = 20
-#~ rcParams['lines.linewidth'] = 2
+from common import *
 
 def MaxwellModes(z, t, Gt):
 	"""
@@ -78,11 +63,11 @@ def MaxwellModes(z, t, Gt):
 	Gexp   = Gt
 
 	#
-	# Prune small -ve weights g(i)
+	# Prune small and -ve weights g(i)
 	#
 	g, error, condKp = nnLLS(t, tau, Gexp)
 
-	izero = np.where(g < 1e-8)
+	izero = np.where(g < 1e-12)
 	tau   = np.delete(tau, izero)
 	g     = np.delete(g, izero)
 
@@ -90,14 +75,12 @@ def MaxwellModes(z, t, Gt):
 	return g, tau, error, condKp
 
 def nnLLS(t, tau, Gexp):
-	
 	"""
 	#
 	# Helper subfunction which does the actual LLS problem
 	# helps MaxwellModes
 	#
 	"""
-	from scipy.optimize import nnls
 	
 	n       = len(Gexp)
 	S, T    = np.meshgrid(tau, t)
@@ -241,11 +224,24 @@ def costFcn_magic(par, g, tau, imode):
 
 	return quad(normKern_magic, tmin, tmax, args=(gn, taun, g1, tau1, g2, tau2))[0]
 
-def mergeModes_magic(g, tau, imode):
+def FineTuneSolution(tau, t, Gexp):
+	"""Given a spacing of modes tau, tries to do NLLS to fine tune it further
+	   If it fails, then it returns the old tau back"""
+	   
+	try:
+		res   = least_squares(res_tG, tau, bounds=(0., np.inf),	args=(t, Gexp))
+		tau   = res.x
+	except:	
+		pass
+
+	g, tau, _, _ = MaxwellModes(np.log(tau), t, Gexp)   # Get g_i, taui
+
+	return g, tau
+
+
+def mergeModes_magic(g, tau, imode, t, Gexp):
 	"""merge modes imode and imode+1 into a single mode
 	   return gp and taup corresponding to this new mode"""
-	from scipy.integrate import quad
-	from scipy.optimize import minimize	
 
 	iniGuess = [g[imode] + g[imode+1], 0.5*(tau[imode] + tau[imode+1])]
 	res = minimize(costFcn_magic, iniGuess, args=(g, tau, imode))
@@ -253,8 +249,17 @@ def mergeModes_magic(g, tau, imode):
 	newtau        = np.delete(tau, imode+1)
 	newtau[imode] = res.x[1]
 
-	newg          = np.delete(g, imode+1)
-	newg[imode]   = res.x[0]
+	newg, newtau = FineTuneSolution(tau, t, Gexp)
+
+	#~ try:
+		#~ res   = least_squares(res_tG, tau, bounds=(0., np.inf),	args=(t, Gexp))
+		#~ tau   = res.x
+		#~ g, _, _, _ = MaxwellModes(np.log(tau), t, Gexp)   # Get g_i, taui
+	#~ except:
+		#~ pass	
+
+	#~ newg          = np.delete(g, imode+1)
+	#~ newg[imode]   = res.x[0]
 		
 	return newg, newtau
 
@@ -271,15 +276,30 @@ def initializeDiscSpec(par):
 	
 	# range of N scanned
 	Nmax  = min(np.floor(3.0 * np.log10(max(t)/min(t))),n/4); # maximum Nopt
-	Nmin  = max(np.floor(0.5 * np.log10(max(t)/min(t))),3);   # minimum Nopt
+	Nmin  = max(np.floor(0.5 * np.log10(max(t)/min(t))),2);   # minimum Nopt
 	Nv    = np.arange(Nmin, Nmax + 1).astype(int)
 
 	# Estimate Error Weight from Continuous Curve Fit
-	kernMat = common.getKernMat(s,t)
-	Gc      = common.kernel_prestore(H, kernMat);
+	kernMat = getKernMat(s,t)
+	Gc      = kernel_prestore(H, kernMat);
 	Cerror  = 1./(np.std(Gc/Gexp - 1.))  #	Cerror = 1.?
 	
 	return t, Gexp, s, H, Nv, Gc, Cerror
+
+
+def res_tG(tau, texp, Gexp):
+	"""
+		Helper function for final optimization problem
+	"""
+	g, _, _ = nnLLS(texp, tau, Gexp)
+	Gmodel  = np.zeros(len(texp))
+
+	for j in range(len(g)):
+		Gmodel += g[j] * np.exp(-texp/tau[j])
+		
+	residual = Gmodel/Gexp - 1.
+        
+	return residual
 
 def getDiscSpecMagic(par):
 
@@ -290,7 +310,7 @@ def getDiscSpecMagic(par):
 	npts = len(Nv)
 
 	# range of wtBaseDist scanned
-	wtBase = 0.05 * np.arange(1, 20)
+	wtBase = par['deltaBaseWeightDist'] * np.arange(1, 1./par['deltaBaseWeightDist'])
 	AICbst = np.zeros(len(wtBase))
 	Nbst   = np.zeros(len(wtBase))
 	nzNbst = np.zeros(len(wtBase))  # number of nonzeros
@@ -312,11 +332,20 @@ def getDiscSpecMagic(par):
 		for i, N in enumerate(Nv):
 			z, hz  = GridDensity(np.log(s), wt, N)     # Select "tau" Points
 			g, tau, ev[i], _ = MaxwellModes(z, t, Gexp)
-			nzNv[i]                 = len(g)
+			nzNv[i]          = len(g)
 
 		# store the best solution for this particular wb
 		AIC        = 2. * Nv + 2. * Cerror * ev
-		
+
+		#
+		# Fine-Tune the best in class-fit further by trying an NLLS optimization on it.
+		#		
+		N      = Nv[np.argmin(AIC)]
+		z, hz  = GridDensity(np.log(s), wt, N)     		# Select "tau" Points
+		g, tau, error, cKp = MaxwellModes(z, t, Gexp)   # Get g_i, taui
+		g, tau = FineTuneSolution(tau, t, Gexp)
+
+
 		AICbst[ib] = min(AIC)
 		Nbst[ib]   = Nv[np.argmin(AIC)]
 		nzNbst[ib] = nzNv[np.argmin(AIC)]
@@ -327,26 +356,28 @@ def getDiscSpecMagic(par):
 	wbopt = wtBase[np.argmin(AICbst)]
 
 	#
-	# Recompute the best data-set stats
+	# Recompute the best data-set stats, and fine tune it
 	#
-	wt                 = GetWeights(H, t, s, wbopt)	
-	z, hz              = GridDensity(np.log(s), wt, Nopt)           # Select "tau" Points
-	g, tau, error, cKp = MaxwellModes(z, t, Gexp)   # Get g_i, taui
+	wt           = GetWeights(H, t, s, wbopt)	
+	z, hz        = GridDensity(np.log(s), wt, Nopt)           # Select "tau" Points
+	g, tau, _, _ = MaxwellModes(z, t, Gexp)   # Get g_i, taui	
+	g, tau       = FineTuneSolution(tau, t, Gexp)
 
 	#
 	# Check if modes are close enough to merge
 	#
-	#
-	# Check if modes are close enough to merge
-	#
+	indx       = np.argsort(tau)
+	tau        = tau[indx]
+	g          = g[indx]
 	tauSpacing = tau[1:]/tau[:-1]
+
 	while min(tauSpacing) < par['minTauSpacing']:
-		imode      = np.argmin(tauSpacing)      # merge modes imode and imode + 1
-		g, tau     = mergeModes_magic(g, tau, imode)
+		print("\tTau Spacing < minTauSpacing")
+
+		imode      = np.argmin(tauSpacing)      # merge modes imode and imode + 1	
+		g, tau     = mergeModes_magic(g, tau, imode, t, Gexp)
 		tauSpacing = tau[1:]/tau[:-1]
 		
-	print(min(tauSpacing))
-	
 	if par['verbose']:
 		print('\n(*) Number of optimum nodes = {0:d}\n'.format(len(g)))
 
@@ -359,8 +390,8 @@ def getDiscSpecMagic(par):
 		plt.clf()
 		plt.plot(wtBase, AICbst, label='AIC')
 		plt.plot(wtBase, nzNbst, label='Nbst')
-		plt.scatter(wbopt, len(g), color='k')
-		plt.scatter(wbopt, np.min(AICbst), color='k')
+		#~ plt.scatter(wbopt, len(g), color='k')
+		plt.axvline(x=wbopt, color='gray')
 		plt.yscale('log')
 		plt.xlabel('baseDistWt')
 		plt.legend()
@@ -427,7 +458,7 @@ def ReadData(par):
 	fNameH = 'output/H.dat'
 
 	# Read experimental data
-	t, Gexp = common.GetExpData(par['GexpFile'])
+	t, Gexp = GetExpData(par['GexpFile'])
 
 	# Read continuous spectrum
 	s, H    = np.loadtxt(fNameH, unpack=True)
@@ -445,5 +476,5 @@ if __name__ == '__main__':
 	#
 	# Read input parameters from file "inp.dat"
 	#
-	par = common.readInput('inp.dat')
+	par = readInput('inp.dat')
 	_ = getDiscSpecMagic(par)	

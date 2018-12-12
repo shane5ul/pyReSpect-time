@@ -60,9 +60,19 @@ The code is based on the Matlab program [ReSpect](https://www.mathworks.com/matl
 
 ### Major Upgrade: August 2008
 
+#### Continuous Spectrum
 + orignal program with n = 100 and lambda = 20 pts with clean 1 mode data took ~33s.
 + prestore kernMat: evaluation of kernel (meshgrid S, T, and hs) by prestoring kernMat ~12.5s (~3x speed gain)
 + improved least_squares setting by incorporating jacobianLM; ~6s (2x gain)
 + lcurve coarser (auto) mesh, robust criterion, and interpolation ~3.5s (~1.75x gain)
 + Total gain in speed as a consequence of these improvements is 33s -> 3.5s a nearly 10x gain!
++ making jupyter interact compliant
+
+#### Discrete Spectrum
++ AutoMagic Mode: need only par verbose and plotting flags; auto Nopt
++ switching to nnls as default fitting engine
++ changed older MaxwellModes and LLS -> nnls
++ some printing modifications
++ hardcoding prune = True everywhere; doesn't seem to be use case otherwise
++ making jupyter interact compliant
 

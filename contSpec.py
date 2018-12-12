@@ -17,40 +17,7 @@
 #
 
 
-#
-# Imports
-#
-import numpy as np
-import matplotlib.pyplot as plt
-
-from scipy.optimize import least_squares
-from scipy.interpolate import interp1d
-
-import common
-import os
-import time
-
-#
-# plotting preferences: change this block to suit your taste
-#
-
-#~ try:
-	#~ import seaborn as sns
-#~ except ImportError:
-	#~ plt.style.use('ggplot')		
-#~ else:
-	#~ plt.style.use('seaborn-ticks')
-	#~ sns.set_color_codes()
-	#~ sns.set_style({"xtick.direction": "in","ytick.direction": "in"})
-
-plt.style.use('ggplot')		
-
-from matplotlib import rcParams
-rcParams['axes.labelsize'] = 28 
-rcParams['xtick.labelsize'] = 20
-rcParams['ytick.labelsize'] = 20 
-rcParams['legend.fontsize'] = 20
-rcParams['lines.linewidth'] = 2
+from common import *
 
 # HELPER FUNCTIONS
 
@@ -113,7 +80,7 @@ def lcurve(Gexp, Hgs, kernMat, par):
 	for i in range(len(lam)):
 		lamb    = lam[i]
 		H       = getH(lamb, Gexp, H, kernMat)
-		rho[i]  = np.linalg.norm((1 - common.kernel_prestore(H,kernMat)/Gexp))
+		rho[i]  = np.linalg.norm((1 - kernel_prestore(H,kernMat)/Gexp))
 		eta[i]  = np.linalg.norm(np.diff(H, n=2))
 	#
 	# 8/1/2018: Making newer strategy more accurate and robust: dividing by minimum rho/eta
@@ -185,7 +152,7 @@ def residualLM(H, lam, Gexp, kernMat):
 	# r = vector of size (n+nl,1);
 	#
 
-	r[0:n]    = (1. - common.kernel_prestore(H,kernMat)/Gexp)/np.sqrt(n)  # the Gt and
+	r[0:n]    = (1. - kernel_prestore(H,kernMat)/Gexp)/np.sqrt(n)  # the Gt and
 	r[n:n+nl] = np.sqrt(lam) * np.diff(H, n=2)/np.sqrt(nl)  # second derivative
 	
 	return r
@@ -252,7 +219,7 @@ def getContSpec(par):
 	if par['verbose']:
 		print('\n(*) Start\n(*) Loading Data File: {}...'.format(par['GexpFile']))
 
-	t, Gexp = common.GetExpData(par['GexpFile'])
+	t, Gexp = GetExpData(par['GexpFile'])
 
 	if par['verbose']:
 		print('(*) Initial Set up...', end="")
@@ -275,7 +242,7 @@ def getContSpec(par):
 	hs   = (smax/smin)**(1./(ns-1))
 	s    = smin * hs**np.arange(ns)
 
-	kernMat = common.getKernMat(s,t)
+	kernMat = getKernMat(s,t)
 	
 	tic  = time.time()
 	Hgs  = InitializeH(Gexp, s, kernMat)
@@ -323,7 +290,7 @@ def getContSpec(par):
 
 		np.savetxt('output/H.dat', np.c_[s, H], fmt='%e')
 		
-		K   = common.kernel_prestore(H, kernMat);	
+		K   = kernel_prestore(H, kernMat);	
 		np.savetxt('output/Gfit.dat', np.c_[t, K], fmt='%e')
 
 	#
@@ -340,7 +307,7 @@ def getContSpec(par):
 		plt.savefig('output/H.pdf')
 
 		plt.clf()
-		K = common.kernel_prestore(H, kernMat)
+		K = kernel_prestore(H, kernMat)
 		plt.loglog(t, Gexp,'o',t, K, 'k-')
 		plt.xlabel(r'$t$')
 		plt.ylabel(r'$G(t)$')
@@ -380,10 +347,17 @@ def getContSpec(par):
 
 def guiFurnishGlobals(par):
 	"""Furnish Globals to accelerate interactive plot in jupyter notebooks"""
+
+	# plot settings
 	from matplotlib import rcParams
+	rcParams['axes.labelsize'] = 14 
+	rcParams['xtick.labelsize'] = 12
+	rcParams['ytick.labelsize'] = 12 
+	rcParams['legend.fontsize'] = 12
+	rcParams['lines.linewidth'] = 2
 
 	# experimental data
-	t, Gexp = common.GetExpData(par['GexpFile'])
+	t, Gexp = GetExpData(par['GexpFile'])
 	n    = len(t)
 	ns   = par['ns']    # discretization of 'tau'
 
@@ -400,7 +374,7 @@ def guiFurnishGlobals(par):
 
 	hs   = (smax/smin)**(1./(ns-1))
 	s    = smin * hs**np.arange(ns)
-	kernMat = common.getKernMat(s,t)
+	kernMat = getKernMat(s,t)
 
 	# toggle flags to prevent printing
 
@@ -410,12 +384,6 @@ def guiFurnishGlobals(par):
 	# load lamda, rho, eta
 	lam, rho, eta = np.loadtxt('output/rho-eta.dat', unpack=True)
 
-	# plot settings
-	rcParams['axes.labelsize'] = 14 
-	rcParams['xtick.labelsize'] = 12
-	rcParams['ytick.labelsize'] = 12 
-	rcParams['legend.fontsize'] = 12
-	rcParams['lines.linewidth'] = 2
 
 	plt.clf()
 
@@ -429,5 +397,5 @@ if __name__ == '__main__':
 	#
 	# Read input parameters from file "inp.dat"
 	#
-	par = common.readInput('inp.dat')
+	par = readInput('inp.dat')
 	H, lamC = getContSpec(par)
