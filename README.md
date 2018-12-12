@@ -58,7 +58,13 @@ ipywidgets (6.0.0)
 
 The code is based on the Matlab program [ReSpect](https://www.mathworks.com/matlabcentral/fileexchange/40458-respect), which extract the continuous and discrete relaxation spectra from frequency data, G*(w).
 
-### Major Upgrade: August 2008
+### Major Upgrade: December 2018
+
++ moved all common imports and definitions to common; made completely visible
++ in discSpec(): added a NLLS routine to optimize tau; use previous optima as initial guesses for final tau; this greatly improved the quality of fits.
+
+
+### Major Upgrade: August 2018
 
 #### Continuous Spectrum
 + orignal program with n = 100 and lambda = 20 pts with clean 1 mode data took ~33s.

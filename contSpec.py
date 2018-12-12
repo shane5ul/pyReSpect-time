@@ -1,21 +1,6 @@
 #
-# 8/2/2018: Several meaningful changes to improve accuracy, speed, and look.
+# Help to find continuous spectrum
 #
-# SPEED:
-# -----
-# (*) orignal program with n = 100 and lambda = 20 pts with clean 1 mode data took ~33s.
-# (*) prestore kernMat: evaluation of kernel (meshgrid S, T, and hs) by prestoring kernMat ~12.5s (~3x speed gain)
-# (*) improved least_squares setting by incorporating jacobianLM; ~6s (2x gain)
-# (*) lcurve coarser (auto) mesh, robust criterion, and interpolation ~3.5s (~1.75x gain)
-#
-#     Total gain in speed as a consequence of these improvements is 33s -> 3.5s a nearly 10x gain!
-#
-
-# LOOK:
-# ----
-# (*) incorporated seaborn style if included, else larger ggplot style
-#
-
 
 from common import *
 

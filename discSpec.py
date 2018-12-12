@@ -1,42 +1,45 @@
 #
-# 8/21/2018: 
-#
-# (*) AutoMagic Mode: need only par verbose and plotting flags; auto Nopt
-# (*) switching to nnls as default fitting engine
-# (*) changed older MaxwellModes and LLS -> nnls
-# (*) some printing modifications
-# (*) hardcoding prune = True everywhere; doesn't seem to be use case otherwise
-# (*) making jupyter interact compliant
- 
-
-# Function: discSpec(par)
-#
-# Uses the continuous relaxation spectrum extracted using contSpec()
-# to determine an approximate discrete approximation.
-#
-# Input: Communicated by the datastructure "par"
-#
-# Input: Communicated by the datastructure "par"
-#
-#        fGstFile = name of file that contains G*(w) in 3 columns [w Gp Gpp]
-#                   default: 'Gst.dat' is assumed.
-#        verbose  = true, then prints onscreen messages, and prints datafiles
-#        plotting = true, then plots to stdio.
-#
-#
-# Output: Nopt    = optimum number of discrete modes
-#         [g tau] = spectrum
-#         error   = error norm of the discrete fit
-#        
-#         dmodes.dat : Prints the [g tau] for the particular Nopt
-#         aic.dat    : [N error aic]
-#         Gfitd.dat  : The discrete G* for Nopt [w Gp Gpp] 
-#
-
-
-
+# 12/15/2018: 
+# (*) Introducing NNLS optimization of previous optimal solution
+#     - can make deltaBaseWeightDist : 0.2 or 0.25 [coarser from 0.05]
+#     - wrote new routines: FineTuneSolution, res_tG (for vector of residuals)
+# 
 
 from common import *
+
+def initializeDiscSpec(par):
+	"""Returns:
+		(*)	the experimental data: t, Gexp
+		(*) the continuous spectrum: s, H (from output/H.dat)
+		(*) Number of modes range: Nv
+		(*) Error Weight estimate from Continuous Curve (AIC criterion)
+	"""
+	
+	# read input; initialize parameters
+	if par['verbose']:
+		print('\n(*) Start\n(*) Loading Data Files: ... {}...'.format(par['GexpFile']))
+
+	# Read experimental data
+	t, Gexp = GetExpData(par['GexpFile'])
+
+	# Read the continuous spectrum
+	fNameH  = 'output/H.dat'
+	s, H    = np.loadtxt(fNameH, unpack=True)
+
+	n    = len(t);
+	ns   = len(s);
+	
+	# range of N scanned
+	Nmax  = min(np.floor(3.0 * np.log10(max(t)/min(t))),n/4); # maximum Nopt
+	Nmin  = max(np.floor(0.5 * np.log10(max(t)/min(t))),2);   # minimum Nopt
+	Nv    = np.arange(Nmin, Nmax + 1).astype(int)
+
+	# Estimate Error Weight from Continuous Curve Fit
+	kernMat = getKernMat(s,t)
+	Gc      = kernel_prestore(H, kernMat);
+	Cerror  = 1./(np.std(Gc/Gexp - 1.))  #	Cerror = 1.?
+	
+	return t, Gexp, s, H, Nv, Gc, Cerror
 
 def MaxwellModes(z, t, Gt):
 	"""
@@ -45,18 +48,15 @@ def MaxwellModes(z, t, Gt):
 	%
 	% Solves the linear least squares problem to obtain the DRS
 	%
-	% Input: z = points distributed according to the density,
+	% Input: z  = points distributed according to the density, [z = log(tau)]
 	%        t  = n*1 vector contains times,
 	%        Gt = n*1 vector contains G(t),
-	%
-	%        Prune = Avoid modes with -ve weights (=1), or don't care (0) 
 	%
 	% Output: g, tau = spectrum  (array)
 	%         error = relative error between the input data and the G(t) inferred from the DRS
 	%         condKp = condition number
 	%
 	"""
-
 	N      = len(z)
 	tau    = np.exp(z)
 	n      = len(t)
@@ -71,17 +71,15 @@ def MaxwellModes(z, t, Gt):
 	tau   = np.delete(tau, izero)
 	g     = np.delete(g, izero)
 
-
 	return g, tau, error, condKp
 
 def nnLLS(t, tau, Gexp):
 	"""
 	#
 	# Helper subfunction which does the actual LLS problem
-	# helps MaxwellModes
+	# helps MaxwellModes; relies on nnls
 	#
 	"""
-	
 	n       = len(Gexp)
 	S, T    = np.meshgrid(tau, t)
 	K		= np.exp(-T/S)		# n * nmodes
@@ -89,11 +87,9 @@ def nnLLS(t, tau, Gexp):
 	#
 	# gets (Gt/GtE - 1)^2, instead of  (Gt -  GtE)^2
 	#
-
 	Kp      = np.dot(np.diag((1./Gexp)), K)
 	condKp  = np.linalg.cond(Kp)
 	g       = nnls(Kp, np.ones(len(Gexp)))[0]
-#	g       = np.linalg.lstsq(Kp, np.ones(len(Gexp)), rcond=-1)[0]
 		
 	GtM   	= np.dot(K, g)
 	error 	= np.sum((GtM/Gexp - 1.)**2)
@@ -101,7 +97,6 @@ def nnLLS(t, tau, Gexp):
 	return g, error, condKp
 
 def GetWeights(H, t, s, wb):
-
 	"""
 	%
 	% Function: GetWeights(input)
@@ -202,6 +197,26 @@ def GridDensity(x, px, N):
 
 	return z, h
 
+def mergeModes_magic(g, tau, imode, t, Gexp):
+	"""merge modes imode and imode+1 into a single mode
+	   return gp and taup corresponding to this new mode;
+	   12/2018 - also tries finetuning before returning
+	   
+	   uses helper functions:
+	   - normKern_magic()
+	   - costFcn_magic()
+	   
+	   
+	"""
+	iniGuess = [g[imode] + g[imode+1], 0.5*(tau[imode] + tau[imode+1])]
+	res = minimize(costFcn_magic, iniGuess, args=(g, tau, imode))
+
+	newtau        = np.delete(tau, imode+1)
+	newtau[imode] = res.x[1]
+
+	newg, newtau = FineTuneSolution(tau, t, Gexp)
+			
+	return newg, newtau
 
 def normKern_magic(t, gn, taun, g1, tau1, g2, tau2):
 	"""helper function: for costFcn and mergeModes"""
@@ -226,7 +241,10 @@ def costFcn_magic(par, g, tau, imode):
 
 def FineTuneSolution(tau, t, Gexp):
 	"""Given a spacing of modes tau, tries to do NLLS to fine tune it further
-	   If it fails, then it returns the old tau back"""
+	   If it fails, then it returns the old tau back
+	   
+	   Uses helper function: res_tG which computes residuals
+	   """
 	   
 	try:
 		res   = least_squares(res_tG, tau, bounds=(0., np.inf),	args=(t, Gexp))
@@ -237,55 +255,6 @@ def FineTuneSolution(tau, t, Gexp):
 	g, tau, _, _ = MaxwellModes(np.log(tau), t, Gexp)   # Get g_i, taui
 
 	return g, tau
-
-
-def mergeModes_magic(g, tau, imode, t, Gexp):
-	"""merge modes imode and imode+1 into a single mode
-	   return gp and taup corresponding to this new mode"""
-
-	iniGuess = [g[imode] + g[imode+1], 0.5*(tau[imode] + tau[imode+1])]
-	res = minimize(costFcn_magic, iniGuess, args=(g, tau, imode))
-
-	newtau        = np.delete(tau, imode+1)
-	newtau[imode] = res.x[1]
-
-	newg, newtau = FineTuneSolution(tau, t, Gexp)
-
-	#~ try:
-		#~ res   = least_squares(res_tG, tau, bounds=(0., np.inf),	args=(t, Gexp))
-		#~ tau   = res.x
-		#~ g, _, _, _ = MaxwellModes(np.log(tau), t, Gexp)   # Get g_i, taui
-	#~ except:
-		#~ pass	
-
-	#~ newg          = np.delete(g, imode+1)
-	#~ newg[imode]   = res.x[0]
-		
-	return newg, newtau
-
-def initializeDiscSpec(par):
-	
-	# read input; initialize parameters
-	if par['verbose']:
-		print('\n(*) Start\n(*) Loading Data Files: ... {}...'.format(par['GexpFile']))
-
-	t, Gexp, s, H = ReadData(par)
-	
-	n    = len(t);
-	ns   = len(s);
-	
-	# range of N scanned
-	Nmax  = min(np.floor(3.0 * np.log10(max(t)/min(t))),n/4); # maximum Nopt
-	Nmin  = max(np.floor(0.5 * np.log10(max(t)/min(t))),2);   # minimum Nopt
-	Nv    = np.arange(Nmin, Nmax + 1).astype(int)
-
-	# Estimate Error Weight from Continuous Curve Fit
-	kernMat = getKernMat(s,t)
-	Gc      = kernel_prestore(H, kernMat);
-	Cerror  = 1./(np.std(Gc/Gexp - 1.))  #	Cerror = 1.?
-	
-	return t, Gexp, s, H, Nv, Gc, Cerror
-
 
 def res_tG(tau, texp, Gexp):
 	"""
@@ -302,6 +271,21 @@ def res_tG(tau, texp, Gexp):
 	return residual
 
 def getDiscSpecMagic(par):
+	"""
+	# Function: getDiscSpecMagic(par)
+	#
+	# Uses the continuous relaxation spectrum extracted using getContSpec()
+	# to determine an approximate discrete approximation.
+	#
+	# Input: Communicated by the datastructure "par"
+	#
+	# Output: Nopt    = optimum number of discrete modes
+	#         [g tau] = spectrum
+	#         error   = error norm of the discrete fit
+	#        
+	#         dmodes.dat : Prints the [g tau] for the particular Nopt
+	#         aic.dat    : [N error aic]
+	#         Gfitd.dat  : The discrete G(t) for Nopt [t Gt]"""
 
 	t, Gexp, s, H, Nv, Gc, Cerror = initializeDiscSpec(par)
 	
@@ -450,21 +434,6 @@ def getDiscSpecMagic(par):
 
 
 	return Nopt, g, tau, error
-
-def ReadData(par):
-	"""
-		Read experimental data, and the continuous spectrum
-	"""
-	fNameH = 'output/H.dat'
-
-	# Read experimental data
-	t, Gexp = GetExpData(par['GexpFile'])
-
-	# Read continuous spectrum
-	s, H    = np.loadtxt(fNameH, unpack=True)
-
-	return t, Gexp, s, H
-
 
 #############################
 #

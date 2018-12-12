@@ -1,9 +1,49 @@
-import numpy as np
-from scipy.interpolate import interp1d
+#
+# Global Imports and Plot Settings
+#
 
+import numpy as np
+import matplotlib.pyplot as plt
+
+from scipy.interpolate import interp1d
+from scipy.integrate import cumtrapz, quad
+from scipy.optimize import nnls, minimize, least_squares
+
+import time
+import os
+
+#
+# plotting preferences: change this block to suit your taste
+#
+
+plt.style.use('ggplot')		
+
+#~ try:
+	#~ import seaborn as sns
+#~ except ImportError:
+	#~ plt.style.use('ggplot')		
+#~ else:
+	#~ plt.style.use('seaborn-ticks')
+	#~ sns.set_color_codes()
+	#~ sns.set_style({"xtick.direction": "in","ytick.direction": "in"})
+
+from matplotlib import rcParams
+rcParams['axes.labelsize'] = 28 
+rcParams['xtick.labelsize'] = 20
+rcParams['ytick.labelsize'] = 20 
+rcParams['legend.fontsize'] = 20
+rcParams['lines.linewidth'] = 2
+
+#
 #
 # Functions common to both discrete and continuous spectra
 #
+# def readInput(InpDataFileName)  : read input data to determine program settings
+# def GetExpData(GtDataFileName)  : read experimental data
+# def getKernMat(s, t) 			  : prestore Kernel Matrix, ... together with ...
+# def kernel_prestore(H, kernMat) : ... greatly speeds evaluation of the kernel and overall speed
+#
+
 def readInput(fname='inp.dat'):
 	"""Reads data from the input file (default = 'inp.dat')
 	   and populates the parameter dictionary par"""
@@ -25,18 +65,6 @@ def readInput(fname='inp.dat'):
 			val = eval(tmp)
 
 			par[key] = val
-
-	#~ #
-	#~ # Check Consistency of Input Parameters
-	#~ #	
-	#~ if par['BaseDistWt'] < 0. or par['BaseDistWt'] > 1. :
-		#~ raise ValueError('The input parameter BaseDistWt needs to be between 0 and 1')
-  
-	#~ elif par['condWt'] < 0. or par['condWt'] > 1.:
-		#~ raise ValueError('The input parameter condWt needs to be between 0 and 1')
-	#~ else:
-		#~ print('Input parameters look OK ...')			
-			
 			
 	return par
 	
@@ -71,9 +99,8 @@ def GetExpData(fname):
 	return t, Gt
 
 def getKernMat(s, t):
-	
 	"""furnish kerMat() which helps faster kernel evaluation, given s, t
-	   Generates a n*ns matrix exp(-T/S)*hs, which can be multiplies with exp(H)
+	   Generates a n*ns matrix exp(-T/S)*hs, which can be multiplied with exp(H)
 	   to get predicted G"""
 	   
 	ns          = len(s)
@@ -89,7 +116,6 @@ def kernel_prestore(H, kernMat):
 	"""
 	     turbocharging kernel function evaluation by prestoring kernel matrix
 		
-		 Date    : 8/1/2017
 		 Function: kernel_prestore(input)
 		 
 		 Same as kernel, except prestoring hs, S, and T to improve speed 3x.
