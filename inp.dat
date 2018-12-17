@@ -49,7 +49,7 @@ SmFacLam 	: 0
 # Filename for "experimental" data. PlainTXT
 # It should contain G(t) in 2 columns [t Gt]
 #
-GexpFile 	: 'tests/test7.dat'
+GexpFile 	: 'tests/test2.dat'
 
 #
 # Treatment of frequency window ends:
@@ -63,6 +63,20 @@ FreqEnd 	: 1
 
 
 #========================================#
+#  D I S C R E T E     S P E C T R U M   #
+#========================================#
+
+#
+# Max Number of Modes: Set = 0, if you want it to automatically determine
+# the optimal number of modes; otherwise it starts by guessing that you want
+# numModes number of modes; however, the actual number of modes may be less than
+# or equal to numModes, based on how close the modes are (merging), and if any of
+# the mode-weights (gi) are negligible
+#
+MaxNumModes    : 0
+
+
+#========================================#
 #    FINE TUNE SETTINGS                  #
 #========================================#
 
@@ -71,6 +85,9 @@ FreqEnd 	: 1
 #           can look at the rho v/s eta plot to see if this needs to be widened.
 lam_min     : 1e-10
 lam_max     : 1e+1
+
+
+
 
 #
 # discSpec: how finely to sample BaseWeightDist

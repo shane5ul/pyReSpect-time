@@ -31,9 +31,12 @@ def initializeDiscSpec(par):
 	ns   = len(s);
 	
 	# range of N scanned
-	Nmax  = min(np.floor(3.0 * np.log10(max(t)/min(t))),n/4); # maximum Nopt
-	Nmin  = max(np.floor(0.5 * np.log10(max(t)/min(t))),2);   # minimum Nopt
-	Nv    = np.arange(Nmin, Nmax + 1).astype(int)
+	if(par['MaxNumModes'] == 0):
+		Nmax  = min(np.floor(3.0 * np.log10(max(t)/min(t))),n/4); # maximum Nopt
+		Nmin  = max(np.floor(0.5 * np.log10(max(t)/min(t))),2);   # minimum Nopt
+		Nv    = np.arange(Nmin, Nmax + 1).astype(int)
+	else:
+		Nv    = np.arange(par['MaxNumModes'], par['MaxNumModes'] + 1).astype(int)
 
 	# Estimate Error Weight from Continuous Curve Fit
 	kernMat = getKernMat(s,t)
@@ -214,10 +217,8 @@ def mergeModes_magic(g, tau, imode, t, Gexp):
 
 	newtau   = np.delete(tau, imode+1)
 	newtau[imode] = res.x[1]
-	
-	newg, newtau  = FineTuneSolution(newtau, t, Gexp)
-	
-	return newg, newtau
+		
+	return newtau
 
 def normKern_magic(t, gn, taun, g1, tau1, g2, tau2):
 	"""helper function: for costFcn and mergeModes"""
@@ -240,7 +241,7 @@ def costFcn_magic(par, g, tau, imode):
 
 	return quad(normKern_magic, tmin, tmax, args=(gn, taun, g1, tau1, g2, tau2))[0]
 
-def FineTuneSolution(tau, t, Gexp):
+def FineTuneSolution(tau, t, Gexp, estimateError=False):
 	"""Given a spacing of modes tau, tries to do NLLS to fine tune it further
 	   If it fails, then it returns the old tau back
 	   
@@ -248,14 +249,30 @@ def FineTuneSolution(tau, t, Gexp):
 	   """
 	   
 	try:
-		res   = least_squares(res_tG, tau, bounds=(0., np.inf),	args=(t, Gexp))
-		tau   = res.x
+		res = least_squares(res_tG, tau, bounds=(0., np.inf),	args=(t, Gexp))
+		tau = res.x
+	
+		# Error Estimate	
+		if estimateError:
+			tau0 = tau.copy()
+			J = res.jac
+			cov = np.linalg.pinv(J.T.dot(J)) * (res.fun**2).mean()
+			dtau = np.sqrt(np.diag(cov))
+		
 	except:	
 		pass
 
 	g, tau, _, _ = MaxwellModes(np.log(tau), t, Gexp)   # Get g_i, taui
 
-	return g, tau
+	if estimateError:
+		
+		for i in range(len(tau0)):
+			if np.min(np.abs(tau0[i] - tau)) > 1e-12:
+				dtau = np.delete(dtau, i)
+
+		return g, tau, dtau
+	else:
+		return g, tau
 
 def res_tG(tau, texp, Gexp):
 	"""
@@ -346,7 +363,7 @@ def getDiscSpecMagic(par):
 	wt           = GetWeights(H, t, s, wbopt)	
 	z, hz        = GridDensity(np.log(s), wt, Nopt)           # Select "tau" Points
 	g, tau, _, _ = MaxwellModes(z, t, Gexp)   # Get g_i, taui	
-	g, tau       = FineTuneSolution(tau, t, Gexp)
+	g, tau, dtau = FineTuneSolution(tau, t, Gexp, estimateError=True)
 
 	#
 	# Check if modes are close enough to merge
@@ -357,21 +374,17 @@ def getDiscSpecMagic(par):
 	tauSpacing = tau[1:]/tau[:-1]
 	itry       = 0
 
-	print(g, tau)
-
 	while min(tauSpacing) < par['minTauSpacing'] and itry < 3:
 		print("\tTau Spacing < minTauSpacing")
 
-		imode      = np.argmin(tauSpacing)      # merge modes imode and imode + 1	
-		g, tau     = mergeModes_magic(g, tau, imode, t, Gexp)
-		
-		print(itry)
-		print(g, tau)
-		
-		
+		imode   = np.argmin(tauSpacing)      # merge modes imode and imode + 1	
+		tau     = mergeModes_magic(g, tau, imode, t, Gexp)
+	
+		g, tau, dtau  = FineTuneSolution(tau, t, Gexp, estimateError=True)
+				
 		tauSpacing = tau[1:]/tau[:-1]
 		itry      += 1
-		
+
 	if par['verbose']:
 		print('\n(*) Number of optimum nodes = {0:d}\n'.format(len(g)))
 
@@ -427,14 +440,14 @@ def getDiscSpecMagic(par):
 		print('(*) log10(Condition number) of matrix equation: {0:.2f}\n'.format(np.log10(cKp)))
 
 		print('\n\t\tModes\n\t\t-----\n\n')
-		print('i \t    g(i) \t    tau(i)\n')
-		print('---------------------------------------\n')
+		print('  i \t    g(i) \t    tau(i)\t    dtau(i)\n')
+		print('-----------------------------------------------------\n')
 		
 		for i in range(len(g)):
-			print('{0:3d} \t {1:.5e} \t {2:.5e}'.format(i+1,g[i],tau[i]))
+			print('{0:3d} \t {1:.5e} \t {2:.5e} \t {3:.5e}'.format(i+1,g[i],tau[i], dtau[i]))
 		print("\n")
 
-		np.savetxt('output/dmodes.dat', np.c_[g, tau], fmt='%e')
+		np.savetxt('output/dmodes.dat', np.c_[g, tau, dtau], fmt='%e')
 		np.savetxt('output/aic.dat', np.c_[wtBase, nzNbst, AICbst], fmt='%f\t%i\t%e')
 
 		S, T    = np.meshgrid(tau, t)
