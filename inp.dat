@@ -49,7 +49,7 @@ SmFacLam 	: 0
 # Filename for "experimental" data. PlainTXT
 # It should contain G(t) in 2 columns [t Gt]
 #
-GexpFile 	: 'tests/Gte.dat'
+GexpFile 	: 'tests/test7.dat'
 
 #
 # Treatment of frequency window ends:

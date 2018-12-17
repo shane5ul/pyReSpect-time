@@ -6,6 +6,7 @@
 # 
 
 from common import *
+np.set_printoptions(precision=2)
 
 def initializeDiscSpec(par):
 	"""Returns:
@@ -209,13 +210,13 @@ def mergeModes_magic(g, tau, imode, t, Gexp):
 	   
 	"""
 	iniGuess = [g[imode] + g[imode+1], 0.5*(tau[imode] + tau[imode+1])]
-	res = minimize(costFcn_magic, iniGuess, args=(g, tau, imode))
+	res      = minimize(costFcn_magic, iniGuess, args=(g, tau, imode))
 
-	newtau        = np.delete(tau, imode+1)
+	newtau   = np.delete(tau, imode+1)
 	newtau[imode] = res.x[1]
-
-	newg, newtau = FineTuneSolution(tau, t, Gexp)
-			
+	
+	newg, newtau  = FineTuneSolution(newtau, t, Gexp)
+	
 	return newg, newtau
 
 def normKern_magic(t, gn, taun, g1, tau1, g2, tau2):
@@ -354,13 +355,22 @@ def getDiscSpecMagic(par):
 	tau        = tau[indx]
 	g          = g[indx]
 	tauSpacing = tau[1:]/tau[:-1]
+	itry       = 0
 
-	while min(tauSpacing) < par['minTauSpacing']:
+	print(g, tau)
+
+	while min(tauSpacing) < par['minTauSpacing'] and itry < 3:
 		print("\tTau Spacing < minTauSpacing")
 
 		imode      = np.argmin(tauSpacing)      # merge modes imode and imode + 1	
 		g, tau     = mergeModes_magic(g, tau, imode, t, Gexp)
+		
+		print(itry)
+		print(g, tau)
+		
+		
 		tauSpacing = tau[1:]/tau[:-1]
+		itry      += 1
 		
 	if par['verbose']:
 		print('\n(*) Number of optimum nodes = {0:d}\n'.format(len(g)))
