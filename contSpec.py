@@ -65,8 +65,8 @@ def lcurve(Gexp, Hgs, kernMat, par):
 	for i in range(len(lam)):
 		lamb    = lam[i]
 		H       = getH(lamb, Gexp, H, kernMat)
-		rho[i]  = np.linalg.norm((1 - kernel_prestore(H,kernMat)/Gexp))
-		eta[i]  = np.linalg.norm(np.diff(H, n=2))
+		rho[i]  = np.linalg.norm((1 - kernel_prestore(H,kernMat)/Gexp))/np.sqrt(len(Gexp))
+		eta[i]  = np.linalg.norm(np.diff(H, n=2))/np.sqrt(len(H))
 	#
 	# 8/1/2018: Making newer strategy more accurate and robust: dividing by minimum rho/eta
 	# which is not as sensitive to lam_min, lam_max. This makes lamC robust to range of lam explored
@@ -74,6 +74,7 @@ def lcurve(Gexp, Hgs, kernMat, par):
 	
 	#er = rho/np.amin(rho) + eta/np.amin(eta);
 	er    = rho/np.amin(rho) + eta/(np.sqrt(np.amax(eta)*np.amin(eta)));
+
 	#
 	# Since rho v/s lambda is smooth, we can interpolate the coarse mesh to find minimum
 	#
@@ -82,8 +83,26 @@ def lcurve(Gexp, Hgs, kernMat, par):
 	erri = np.exp(interp1d(np.log(lam), np.log(er), kind='cubic')(np.log(lami)))
 
 	ermin = np.amin(erri)
-	eridx = np.argmin(erri)
-	lamC  = lami[eridx]		
+	eridx = np.argmin(erri)	
+	lamC  = lami[eridx]
+	
+
+	#
+	# 12/18; for extremely smooth data have cutoff at rho = 1e-2?
+	#
+	rhoF  = interp1d(lam, rho)
+
+	if  rhoF(lamC) <= par['rho_cutoff']:
+		try:
+			eridx = (np.abs(rhoF(lami) - par['rho_cutoff'])).argmin()
+			if lami[eridx] > lamC:
+				lamC = lami[eridx]				
+		except:
+			pass
+
+
+
+
 
 	# Dialling in the Smoothness Factor
 	if SmoothFac > 0:
