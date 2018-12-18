@@ -249,12 +249,12 @@ def FineTuneSolution(tau, t, Gexp, estimateError=False):
 	   """
 	   
 	try:
-		res = least_squares(res_tG, tau, bounds=(0., np.inf),	args=(t, Gexp))
-		tau = res.x
+		res  = least_squares(res_tG, tau, bounds=(0., np.inf),	args=(t, Gexp))
+		tau  = res.x
+		tau0 = tau.copy()
 	
 		# Error Estimate	
 		if estimateError:
-			tau0 = tau.copy()
 			J = res.jac
 			cov = np.linalg.pinv(J.T.dot(J)) * (res.fun**2).mean()
 			dtau = np.sqrt(np.diag(cov))
@@ -264,12 +264,16 @@ def FineTuneSolution(tau, t, Gexp, estimateError=False):
 
 	g, tau, _, _ = MaxwellModes(np.log(tau), t, Gexp)   # Get g_i, taui
 
-	if estimateError:
+	#
+	# if mode has dropped out, then need to delete corresponding dtau mode
+	#
+	if estimateError and len(tau) < len(tau0):
 		
 		for i in range(len(tau0)):
-			if np.min(np.abs(tau0[i] - tau)) > 1e-12:
+			if np.min(np.abs(tau0[i] - tau)) > 1e-12 * tau0[i]:
 				dtau = np.delete(dtau, i)
 
+	if estimateError:
 		return g, tau, dtau
 	else:
 		return g, tau
