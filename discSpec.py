@@ -71,7 +71,7 @@ def MaxwellModes(z, t, Gt):
 	#
 	g, error, condKp = nnLLS(t, tau, Gexp)
 
-	izero = np.where(g < 1e-12)
+	izero = np.where(g/max(g) < 1e-7)
 	tau   = np.delete(tau, izero)
 	g     = np.delete(g, izero)
 
@@ -261,17 +261,23 @@ def FineTuneSolution(tau, t, Gexp, estimateError=False):
 		
 	except:	
 		pass
+		
+	#~ print("here",tau0, len(tau0))
 
 	g, tau, _, _ = MaxwellModes(np.log(tau), t, Gexp)   # Get g_i, taui
+
+	#~ print("here postMM",tau, len(tau))
 
 	#
 	# if mode has dropped out, then need to delete corresponding dtau mode
 	#
 	if estimateError and len(tau) < len(tau0):
 		
+		nkill = 0
 		for i in range(len(tau0)):
 			if np.min(np.abs(tau0[i] - tau)) > 1e-12 * tau0[i]:
-				dtau = np.delete(dtau, i)
+				dtau = np.delete(dtau, i-nkill)
+				nkill += 1
 
 	if estimateError:
 		return g, tau, dtau
@@ -366,8 +372,15 @@ def getDiscSpecMagic(par):
 	#
 	wt           = GetWeights(H, t, s, wbopt)	
 	z, hz        = GridDensity(np.log(s), wt, Nopt)           # Select "tau" Points
-	g, tau, _, _ = MaxwellModes(z, t, Gexp)   # Get g_i, taui	
+	g, tau, _, _ = MaxwellModes(z, t, Gexp)   # Get g_i, taui
+	
+	#~ print(g, tau)
+	
 	g, tau, dtau = FineTuneSolution(tau, t, Gexp, estimateError=True)
+	
+
+
+#	quit()
 
 	#
 	# Check if modes are close enough to merge
@@ -413,8 +426,8 @@ def getDiscSpecMagic(par):
 		plt.clf()
 		plt.loglog(tau,g,'o-', label='disc')
 		plt.loglog(s, np.exp(H), label='cont')
-		plt.xlabel('tau')
-		plt.ylabel('g')
+		plt.xlabel(r'$\tau$')
+		plt.ylabel(r'$g$')
 		plt.legend(loc='lower right')
 		plt.tight_layout()
 		plt.savefig('output/dmodes.pdf')		
@@ -459,6 +472,12 @@ def getDiscSpecMagic(par):
 		GtM   	= np.dot(K, g)
 		np.savetxt('output/Gfitd.dat', np.c_[t, GtM], fmt='%e')
 
+
+		#~ #
+		#~ # estimate final "rho" error
+		#~ #
+		#~ error = np.linalg.norm((GtM/Gexp - 1.))/np.sqrt(len(Gexp))
+		#~ print("rho_error", error)
 
 	return Nopt, g, tau, error
 

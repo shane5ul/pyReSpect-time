@@ -49,14 +49,14 @@ SmFacLam 	: 0
 # Filename for "experimental" data. PlainTXT
 # It should contain G(t) in 2 columns [t Gt]
 #
-GexpFile 	: 'tests/test1.dat'
+GexpFile 	: 'tests/test6.dat'
 
 #
 # Treatment of frequency window ends:
 #
-#  = 3 : t = 1/w - strict condition
-#  = 2 : t = 1/w
-#  = 1 : t = 1/w + lenient condition
+#  = 3 : t = tm - strict condition
+#  = 2 : t = tm
+#  = 1 : t = tm + lenient condition
 #
 
 FreqEnd 	: 1
@@ -84,7 +84,7 @@ MaxNumModes    : 0
 # contSpec: lcurve calculation, limits of lambda explored
 #           can look at the rho v/s eta plot to see if this needs to be widened.
 lam_min     : 1e-10
-lam_max     : 1e+1
+lam_max     : 1e2
 
 #
 # Threshold to avoid picking too small lambda for L-curve without
