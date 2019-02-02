@@ -334,7 +334,7 @@ def getContSpec(par):
 			rhost = np.exp(np.interp(np.log(lamC), np.log(lam), np.log(rho)))
 			etast = np.exp(np.interp(np.log(lamC), np.log(lam), np.log(eta)))
 
-			plt.scatter(rhost, etast, color='k')
+			plt.plot(rhost, etast, 'o', color='k')
 			plt.xscale('log')
 			plt.yscale('log')
 			
