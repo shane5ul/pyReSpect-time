@@ -27,6 +27,7 @@ def initializeDiscSpec(par):
 	fNameH  = 'output/H.dat'
 	s, H    = np.loadtxt(fNameH, unpack=True)
 
+
 	n    = len(t);
 	ns   = len(s);
 	
@@ -40,12 +41,28 @@ def initializeDiscSpec(par):
 
 	# Estimate Error Weight from Continuous Curve Fit
 	kernMat = getKernMat(s,t)
-	Gc      = kernel_prestore(H, kernMat);
+	
+	if par['plateau']:
+
+		try:
+			with open(fNameH) as f:
+				first_line = f.readline().split()
+				if len(first_line) > 2:
+					G0 = float(first_line[-1])
+		except OSError:
+			print('Problem reading G0 from H.dat; Plateau = True')
+			quit()
+
+		Gc      = kernel_prestore(H, kernMat, G0);
+	else:
+		Gc      = kernel_prestore(H, kernMat);
+	
+
 	Cerror  = 1./(np.std(Gc/Gexp - 1.))  #	Cerror = 1.?
 	
 	return t, Gexp, s, H, Nv, Gc, Cerror
 
-def MaxwellModes(z, t, Gt):
+def MaxwellModes(z, t, Gt, isPlateau):
 	"""
 	%
 	% Function: MaxwellModes(input)
@@ -55,6 +72,7 @@ def MaxwellModes(z, t, Gt):
 	% Input: z  = points distributed according to the density, [z = log(tau)]
 	%        t  = n*1 vector contains times,
 	%        Gt = n*1 vector contains G(t),
+	%        isPlateau = True if G0 \neq 0
 	%
 	% Output: g, tau = spectrum  (array)
 	%         error = relative error between the input data and the G(t) inferred from the DRS
@@ -69,15 +87,21 @@ def MaxwellModes(z, t, Gt):
 	#
 	# Prune small and -ve weights g(i)
 	#
-	g, error, condKp = nnLLS(t, tau, Gexp)
+	g, error, condKp = nnLLS(t, tau, Gexp, isPlateau)
 
-	izero = np.where(g/max(g) < 1e-7)
+
+	# search for small 
+	if isPlateau:
+		izero = np.where(g[:-1]/max(g[:-1]) < 1e-7)
+	else:
+		izero = np.where(g/max(g) < 1e-7)
+	
 	tau   = np.delete(tau, izero)
 	g     = np.delete(g, izero)
 
 	return g, tau, error, condKp
 
-def nnLLS(t, tau, Gexp):
+def nnLLS(t, tau, Gexp, isPlateau):
 	"""
 	#
 	# Helper subfunction which does the actual LLS problem
@@ -87,14 +111,17 @@ def nnLLS(t, tau, Gexp):
 	n       = len(Gexp)
 	S, T    = np.meshgrid(tau, t)
 	K		= np.exp(-T/S)		# n * nmodes
+	
+	# K is n*ns [or ns+1]
+	if isPlateau:
+		K = np.hstack(( K, np.ones((len(Gexp), 1)) ))
 		
 	#
 	# gets (Gt/GtE - 1)^2, instead of  (Gt -  GtE)^2
 	#
 	Kp      = np.dot(np.diag((1./Gexp)), K)
 	condKp  = np.linalg.cond(Kp)
-	g       = nnls(Kp, np.ones(len(Gexp)))[0]
-		
+	g       = nnls(Kp, np.ones(len(Gexp)))[0]	
 	GtM   	= np.dot(K, g)
 	error 	= np.sum((GtM/Gexp - 1.)**2)
 
@@ -201,17 +228,16 @@ def GridDensity(x, px, N):
 
 	return z, h
 
-def mergeModes_magic(g, tau, imode, t, Gexp):
+def mergeModes_magic(g, tau, imode):
 	"""merge modes imode and imode+1 into a single mode
 	   return gp and taup corresponding to this new mode;
 	   12/2018 - also tries finetuning before returning
 	   
 	   uses helper functions:
 	   - normKern_magic()
-	   - costFcn_magic()
-	   
-	   
+	   - costFcn_magic()   
 	"""
+	
 	iniGuess = [g[imode] + g[imode+1], 0.5*(tau[imode] + tau[imode+1])]
 	res      = minimize(costFcn_magic, iniGuess, args=(g, tau, imode))
 
@@ -241,7 +267,7 @@ def costFcn_magic(par, g, tau, imode):
 
 	return quad(normKern_magic, tmin, tmax, args=(gn, taun, g1, tau1, g2, tau2))[0]
 
-def FineTuneSolution(tau, t, Gexp, estimateError=False):
+def FineTuneSolution(tau, t, Gexp, isPlateau, estimateError=False):
 	"""Given a spacing of modes tau, tries to do NLLS to fine tune it further
 	   If it fails, then it returns the old tau back
 	   
@@ -249,10 +275,10 @@ def FineTuneSolution(tau, t, Gexp, estimateError=False):
 	   """
 	   
 	try:
-		res  = least_squares(res_tG, tau, bounds=(0., np.inf),	args=(t, Gexp))
+		res  = least_squares(res_tG, tau, bounds=(0., np.inf),	args=(t, Gexp, isPlateau))
 		tau  = res.x
 		tau0 = tau.copy()
-	
+
 		# Error Estimate	
 		if estimateError:
 			J = res.jac
@@ -261,12 +287,9 @@ def FineTuneSolution(tau, t, Gexp, estimateError=False):
 		
 	except:	
 		pass
-		
-	#~ print("here",tau0, len(tau0))
 
-	g, tau, _, _ = MaxwellModes(np.log(tau), t, Gexp)   # Get g_i, taui
-
-	#~ print("here postMM",tau, len(tau))
+	
+	g, tau, _, _ = MaxwellModes(np.log(tau), t, Gexp, isPlateau)   # Get g_i, taui
 
 	#
 	# if mode has dropped out, then need to delete corresponding dtau mode
@@ -284,15 +307,19 @@ def FineTuneSolution(tau, t, Gexp, estimateError=False):
 	else:
 		return g, tau
 
-def res_tG(tau, texp, Gexp):
+def res_tG(tau, texp, Gexp, isPlateau):
 	"""
 		Helper function for final optimization problem
 	"""
-	g, _, _ = nnLLS(texp, tau, Gexp)
+	g, _, _ = nnLLS(texp, tau, Gexp, isPlateau)
 	Gmodel  = np.zeros(len(texp))
 
-	for j in range(len(g)):
+	for j in range(len(tau)):
 		Gmodel += g[j] * np.exp(-texp/tau[j])
+	
+	# add G0
+	if isPlateau:
+		Gmodel += g[-1]
 		
 	residual = Gmodel/Gexp - 1.
         
@@ -329,39 +356,38 @@ def getDiscSpecMagic(par):
 	
 	# main loop over wtBaseDist
 	for ib, wb in enumerate(wtBase):
-		
-		#
+				
 		# Find the distribution of nodes you need
-		#
 		wt  = GetWeights(H, t, s, wb)
 
-		# 
 		# Scan the range of number of Maxwell modes N = (Nmin, Nmax) 
-		#
 		ev    = np.zeros(npts)
 		nzNv  = np.zeros(npts)  # number of nonzero modes 
 
 		for i, N in enumerate(Nv):
+
 			z, hz  = GridDensity(np.log(s), wt, N)     # Select "tau" Points
-			g, tau, ev[i], _ = MaxwellModes(z, t, Gexp)
+			g, tau, ev[i], _ = MaxwellModes(z, t, Gexp, par['plateau'])
 			nzNv[i]          = len(g)
+
 
 		# store the best solution for this particular wb
 		AIC        = 2. * Nv + 2. * Cerror * ev
+
 
 		#
 		# Fine-Tune the best in class-fit further by trying an NLLS optimization on it.
 		#		
 		N      = Nv[np.argmin(AIC)]
 		z, hz  = GridDensity(np.log(s), wt, N)     		# Select "tau" Points
-		g, tau, error, cKp = MaxwellModes(z, t, Gexp)   # Get g_i, taui
-		g, tau = FineTuneSolution(tau, t, Gexp)
 
+		g, tau, error, cKp = MaxwellModes(z, t, Gexp, par['plateau'])   # Get g_i, taui
+		g, tau = FineTuneSolution(tau, t, Gexp, par['plateau'])
 
 		AICbst[ib] = min(AIC)
 		Nbst[ib]   = Nv[np.argmin(AIC)]
 		nzNbst[ib] = nzNv[np.argmin(AIC)]
-		
+	
 	# global best settings of wb and Nopt; note this is nominal Nopt (!= len(g) due to NNLS)
 	
 	Nopt  = int(Nbst[np.argmin(AICbst)])
@@ -372,35 +398,40 @@ def getDiscSpecMagic(par):
 	#
 	wt           = GetWeights(H, t, s, wbopt)	
 	z, hz        = GridDensity(np.log(s), wt, Nopt)           # Select "tau" Points
-	g, tau, _, _ = MaxwellModes(z, t, Gexp)   # Get g_i, taui
+	g, tau, _, _ = MaxwellModes(z, t, Gexp, par['plateau'])   # Get g_i, taui
 	
-	#~ print(g, tau)
-	
-	g, tau, dtau = FineTuneSolution(tau, t, Gexp, estimateError=True)
-	
+		
+	g, tau, dtau = FineTuneSolution(tau, t, Gexp, par['plateau'], estimateError=True)
 
-
-#	quit()
 
 	#
 	# Check if modes are close enough to merge
 	#
 	indx       = np.argsort(tau)
 	tau        = tau[indx]
-	g          = g[indx]
 	tauSpacing = tau[1:]/tau[:-1]
 	itry       = 0
+	
+	if par['plateau']:
+		g[:-1] = g[indx]
+	else:
+		g      = g[indx]
 
 	while min(tauSpacing) < par['minTauSpacing'] and itry < 3:
 		print("\tTau Spacing < minTauSpacing")
 
 		imode   = np.argmin(tauSpacing)      # merge modes imode and imode + 1	
-		tau     = mergeModes_magic(g, tau, imode, t, Gexp)
-	
-		g, tau, dtau  = FineTuneSolution(tau, t, Gexp, estimateError=True)
+		tau     = mergeModes_magic(g, tau, imode)
+		
+		g, tau, dtau  = FineTuneSolution(tau, t, Gexp, par['plateau'], estimateError=True)
 				
 		tauSpacing = tau[1:]/tau[:-1]
 		itry      += 1
+
+
+	if par['plateau']:
+		G0 = g[-1]
+		g  = g[:-1]
 
 	if par['verbose']:
 		print('\n(*) Number of optimum nodes = {0:d}\n'.format(len(g)))
@@ -437,6 +468,10 @@ def getDiscSpecMagic(par):
 		S, T    = np.meshgrid(tau, t)
 		K		= np.exp(-T/S)		# n * nmodes			
 		GtM   	= np.dot(K, g)
+
+		if par['plateau']:
+			GtM += G0
+
 		plt.loglog(t,Gexp,'o')
 		plt.loglog(t,GtM, label='disc')	
 		
@@ -456,6 +491,12 @@ def getDiscSpecMagic(par):
 
 		print('(*) log10(Condition number) of matrix equation: {0:.2f}\n'.format(np.log10(cKp)))
 
+		if par['plateau']:
+			print('(*) Plateau Modulus: {0:.3e}\n'.format(G0))
+			np.savetxt('output/dmodes.dat', np.c_[g, tau, dtau], fmt='%e', header='G0 = {0:0.3e}'.format(G0))
+		else:
+			np.savetxt('output/dmodes.dat', np.c_[g, tau, dtau], fmt='%e')
+
 		print('\n\t\tModes\n\t\t-----\n\n')
 		print('  i \t    g(i) \t    tau(i)\t    dtau(i)\n')
 		print('-----------------------------------------------------\n')
@@ -464,20 +505,17 @@ def getDiscSpecMagic(par):
 			print('{0:3d} \t {1:.5e} \t {2:.5e} \t {3:.5e}'.format(i+1,g[i],tau[i], dtau[i]))
 		print("\n")
 
-		np.savetxt('output/dmodes.dat', np.c_[g, tau, dtau], fmt='%e')
 		np.savetxt('output/aic.dat', np.c_[wtBase, nzNbst, AICbst], fmt='%f\t%i\t%e')
 
 		S, T    = np.meshgrid(tau, t)
 		K		= np.exp(-T/S)		# n * nmodes			
 		GtM   	= np.dot(K, g)
+
+		if par['plateau']:
+			GtM += G0		
+		
 		np.savetxt('output/Gfitd.dat', np.c_[t, GtM], fmt='%e')
 
-
-		#~ #
-		#~ # estimate final "rho" error
-		#~ #
-		#~ error = np.linalg.norm((GtM/Gexp - 1.))/np.sqrt(len(Gexp))
-		#~ print("rho_error", error)
 
 	return Nopt, g, tau, error
 

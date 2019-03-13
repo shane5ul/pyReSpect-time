@@ -10,7 +10,7 @@ This repository contains two python modules `contSpec.py` `discSpec.py`. They ex
 
 It containts a third module `common.py` which contains utilities required by both `contSpec.py` and `discSpec.py`.
 
-In addition to the python modules, jupyter notebooks `interactContSpec.ipynb` and `interactDiscSpec.ipynb` are also included. These allow the user to experiment with parameter settings interactively.
+In addition to the python modules, jupyter notebook `interactContSpec.ipynb` is also included. These allow the user to experiment with parameter settings interactively.
 
 ### Input Files
 
@@ -39,7 +39,7 @@ The **continuous spectrum must be extracted before the discrete spectrum** is co
 
 ### Interactive Mode
 
-The interactive mode offers a "GUI" for exploring parameter settings. To launch use `jupyter notebook interactContSpec.ipynb` or `jupyter notebook interactContSpec.ipynb`.
+The interactive mode offers a "GUI" for exploring parameter settings. To launch use `jupyter notebook interactContSpec.ipynb`.
 
 ### Pre-requisites
 
@@ -57,6 +57,10 @@ ipywidgets (6.0.0)
 ## History
 
 The code is based on the Matlab program [ReSpect](https://www.mathworks.com/matlabcentral/fileexchange/40458-respect), which extract the continuous and discrete relaxation spectra from frequency data, G*(w).
+
+### Major Upgrade: March 2019
++ added ability to infer plateau modulus G0; modified all python routines and inp.dat
++ use a Bayesian formulation to infer uncertainty
 
 ### Major Upgrade: December 2018
 

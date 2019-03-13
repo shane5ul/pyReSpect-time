@@ -49,7 +49,7 @@ SmFacLam 	: 0
 # Filename for "experimental" data. PlainTXT
 # It should contain G(t) in 2 columns [t Gt]
 #
-GexpFile 	: 'tests/test6.dat'
+GexpFile 	: 'tests/test4.dat'
 
 #
 # Treatment of frequency window ends:
@@ -91,7 +91,7 @@ lam_max     : 1e2
 # a pronounced corner. This is the maximum average error per datapoint allowed.
 # Small rho_cutoff implies smaller lamC
 #
-rho_cutoff  : 0.001
+rho_cutoff  : 0
 
 
 #

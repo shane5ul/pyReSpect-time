@@ -65,7 +65,7 @@ def readInput(fname='inp.dat'):
 			val = eval(tmp)
 
 			par[key] = val
-			
+						
 	return par
 	
 def GetExpData(fname):
@@ -99,10 +99,11 @@ def GetExpData(fname):
 	return t, Gt
 
 def getKernMat(s, t):
-	"""furnish kerMat() which helps faster kernel evaluation, given s, t
-	   Generates a n*ns matrix exp(-T/S)*hs, which can be multiplied with exp(H)
-	   to get predicted G"""
+	"""furnish kerMat() which helps faster kernel evaluation
+	   given s, t generates hs * exp(-T/S) [n * ns matrix], where hs = wi = weights
+	   for trapezoidal rule integration.
 	   
+	   This matrix (K) times h = exp(H), Kh, is comparable with Gexp"""	   
 	ns          = len(s)
 	hsv         = np.zeros(ns);
 	hsv[0]      = 0.5 * np.log(s[1]/s[0])
@@ -112,19 +113,26 @@ def getKernMat(s, t):
 	
 	return np.exp(-T/S) * hsv;
 	
-def kernel_prestore(H, kernMat):
+def kernel_prestore(H, kernMat, *argv):
 	"""
 	     turbocharging kernel function evaluation by prestoring kernel matrix
-		
-		 Function: kernel_prestore(input)
+		 Function: kernel_prestore(input) returns K*h, where h = exp(H)
 		 
 		 Same as kernel, except prestoring hs, S, and T to improve speed 3x.
 		
 		 outputs the n*1 dimensional vector K(H)(t) which is comparable to Gexp = Gt
 		
+		 3/11/2019: returning Kh + G0
+		
 		 Input: H = substituted CRS,
-		        kernMat = n*ns matrix exp(-T/S) * hs
+		        kernMat = n*ns matrix [w * exp(-T/S)]
 		        	
 	"""
-	return np.dot(kernMat, np.exp(H))
+	
+	if len(argv) > 0:
+		G0 = argv[0]
+	else:
+		G0 = 0. 
+	
+	return np.dot(kernMat, np.exp(H)) + G0
 
