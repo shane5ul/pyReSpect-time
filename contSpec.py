@@ -458,16 +458,16 @@ def getContSpec(par):
 			if os.path.exists("output/Hlam.dat"):
 				os.remove("output/Hlam.dat")
 				
-			fHlam = open('output/Hlam.dat','ab')
-			for i, lamb in enumerate(lam):
-				np.savetxt(fHlam, Hlam[:,i])	
-			fHlam.close()	
+		fHlam = open('output/Hlam.dat','ab')
+		for i, lamb in enumerate(lam):
+			np.savetxt(fHlam, Hlam[:,i])	
+		fHlam.close()	
 
-			# print logP
-			np.savetxt('output/logPlam.dat', np.c_[lam, logP])
-			
-			# print rho-eta
-			np.savetxt('output/rho-eta.dat', np.c_[lam, rho, eta], fmt='%e')
+		# print logP
+		np.savetxt('output/logPlam.dat', np.c_[lam, logP])
+		
+		# print rho-eta
+		np.savetxt('output/rho-eta.dat', np.c_[lam, rho, eta], fmt='%e')
 
 	#------------
 	# Graphing
