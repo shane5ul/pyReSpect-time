@@ -27,12 +27,12 @@ plt.style.use('ggplot')
 	#~ sns.set_color_codes()
 	#~ sns.set_style({"xtick.direction": "in","ytick.direction": "in"})
 
-from matplotlib import rcParams
-rcParams['axes.labelsize'] = 28 
-rcParams['xtick.labelsize'] = 20
-rcParams['ytick.labelsize'] = 20 
-rcParams['legend.fontsize'] = 20
-rcParams['lines.linewidth'] = 2
+#~ from matplotlib import rcParams
+#~ rcParams['axes.labelsize'] = 28 
+#~ rcParams['xtick.labelsize'] = 20
+#~ rcParams['ytick.labelsize'] = 20 
+#~ rcParams['legend.fontsize'] = 20
+#~ rcParams['lines.linewidth'] = 2
 
 #
 #

@@ -1,2 +1,9 @@
-upto test6 documented in writeup
-test 7 is from ring R198 RP from Nature paper
+Tests 1-6 are from Shanbhag, MTS 2019 paper. Test 1-3 are validation tests.
+
+test1: Bimodal, Linearly Spaced with Noise
+test2: Multimodal, Logarithmically Spaced
+test3: Twin Peaked Spectrum
+test4: Symmetric Star Theory
+test5: Slip Link Simulation of Binary Linear Blend
+test6: Experimental data on Ring Polymers
+test7: test3 with artificially added G0 = 10.0

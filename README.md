@@ -10,7 +10,7 @@ This repository contains two python modules `contSpec.py` `discSpec.py`. They ex
 
 It containts a third module `common.py` which contains utilities required by both `contSpec.py` and `discSpec.py`.
 
-In addition to the python modules, jupyter notebook `interactContSpec.ipynb` is also included. These allow the user to experiment with parameter settings interactively.
+In addition to the python modules, a jupyter notebook `interactContSpec.ipynb` is also provisionally included. This allows the user to experiment with parameter settings interactively.
 
 ### Input Files
 
@@ -24,6 +24,11 @@ The user is expected to supply two files:
 Text files containting output from the code are stored in a directory `output/`. These include a fit of the data, the spectra, and other files relevant to the continuous or discrete spectra calculation. 
 
 Graphical and onscreen output can be suppressed by appropriate flags in `inp.dat`.
+
+### Test Files
+
+A bunch of test files are supplied in the folder `tests/`. These data are described in the paper:
+Shanbhag, S., "pyReSpect: A Computer Program to Extract Discrete and Continuous Spectra from Stress Relaxation Experiments" which will appear in Macromolecular Theory and Simulations in **2019**.
 
 ## Usage
 
@@ -58,9 +63,11 @@ ipywidgets (6.0.0)
 
 The code is based on the Matlab program [ReSpect](https://www.mathworks.com/matlabcentral/fileexchange/40458-respect), which extract the continuous and discrete relaxation spectra from frequency data, G*(w).
 
-### Major Upgrade: March 2019
-+ added ability to infer plateau modulus G0; modified all python routines and inp.dat
-+ use a Bayesian formulation to infer uncertainty
+### Major Upgrade: March-April 2019
++ added ability to infer plateau modulus G0; modified all python routines and reorganized inp.dat
++ use a Bayesian formulation to infer uncertainty in the continuous spectrum
++ currently keeping old method to determine critical lambda, but using a far more efficient method (3-4x savings in compute time)
++ made discSpec.py compliant with G0
 
 ### Major Upgrade: December 2018
 

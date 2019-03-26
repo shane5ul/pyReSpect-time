@@ -11,6 +11,18 @@
 #==================================#
 
 #
+# Filename for "experimental" data. PlainTXT
+# It should contain G(t) in 2 columns [t Gt]
+#
+GexpFile 	: 'tests/test4.dat'
+
+#
+# Plateau Modulus: is there a residual plateau in the data?
+# set = True if you need it to be fitted
+#
+plateau     : False
+
+#
 # Printing to screen and files in output/ is on/off (True/False)
 #
 verbose   	: True
@@ -46,12 +58,6 @@ lamC 		: 0
 SmFacLam 	: 0
 
 #
-# Filename for "experimental" data. PlainTXT
-# It should contain G(t) in 2 columns [t Gt]
-#
-GexpFile 	: 'tests/test4.dat'
-
-#
 # Treatment of frequency window ends:
 #
 #  = 3 : t = tm - strict condition
@@ -84,7 +90,12 @@ MaxNumModes    : 0
 # contSpec: lcurve calculation, limits of lambda explored
 #           can look at the rho v/s eta plot to see if this needs to be widened.
 lam_min     : 1e-10
-lam_max     : 1e2
+lam_max     : 1e3
+
+#
+# Lambda Density per Decade for Lcurve: set = 2 or more
+#
+lamDensity  : 2
 
 #
 # Threshold to avoid picking too small lambda for L-curve without
@@ -92,7 +103,6 @@ lam_max     : 1e2
 # Small rho_cutoff implies smaller lamC
 #
 rho_cutoff  : 0
-
 
 #
 # discSpec: how finely to sample BaseWeightDist
