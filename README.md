@@ -64,7 +64,7 @@ ipywidgets (6.0.0)
 
 ## History
 
-The code is based on the Matlab program [ReSpect](https://www.mathworks.com/matlabcentral/fileexchange/40458-respect), which extract the continuous and discrete relaxation spectra from frequency data, G*(w).
+The code is based on the Matlab program [ReSpect](https://www.mathworks.com/matlabcentral/fileexchange/40458-respect), which extract the continuous and discrete relaxation spectra from frequency data, G*(w). Work was supported by National Science Foundation DMR grants number 0953002 and 1727870.
 
 ### Major Upgrade: March-April 2019
 + added ability to infer plateau modulus G0; modified all python routines and reorganized inp.dat
