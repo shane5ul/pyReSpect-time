@@ -1,6 +1,9 @@
 # pyReSpect-time
 
-Extract continuous and discrete relaxation spectra from stress relaxation modulus G(t)
+Extract continuous and discrete relaxation spectra from stress relaxation modulus G(t). The papers which describe the method and test cases are:
+
++ Shanbhag, S., "pyReSpect: A Computer Program to Extract Discrete and Continuous Spectra from Stress Relaxation Experiments", Macromolecular Theory and Simulations, **2019**, 1900005 [doi: 10.1002/mats.201900005].
++ Takeh, A. and Shanbhag, S. "A computer program to extract the continuous and discrete relaxation spectra from dynamic viscoelastic measurements", Appl. Rheol. **2013**, 23, 24628. 
 
 ## Files
 
