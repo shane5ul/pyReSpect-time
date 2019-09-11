@@ -439,10 +439,6 @@ def getContSpec(par):
 		te = time.time() - tic
 		print('done ({0:.1f} seconds)\n(*) Writing and Printing, ...'.format(te), end="")
 
-		# create output directory if none exists
-		if not os.path.exists("output"):
-			os.makedirs("output")
-
 		# Save inferred G(t)
 		if par['plateau']:
 			K   = kernel_prestore(H, kernMat, G0);	

@@ -65,6 +65,10 @@ def readInput(fname='inp.dat'):
 			val = eval(tmp)
 
 			par[key] = val
+
+	# create output directory if none exists
+	if not os.path.exists("output"):
+		os.makedirs("output")
 						
 	return par
 	
