@@ -401,31 +401,32 @@ def getDiscSpecMagic(par):
 	#
 	# Check if modes are close enough to merge
 	#
-	indx       = np.argsort(tau)
-	tau        = tau[indx]
-	tauSpacing = tau[1:]/tau[:-1]
-	itry       = 0
-	
-	if par['plateau']:
-		g[:-1] = g[indx]
-	else:
-		g      = g[indx]
-
-	while min(tauSpacing) < par['minTauSpacing'] and itry < 3:
-		print("\tTau Spacing < minTauSpacing")
-
-		imode   = np.argmin(tauSpacing)      # merge modes imode and imode + 1	
-		tau     = mergeModes_magic(g, tau, imode)
-		
-		g, tau, dtau  = FineTuneSolution(tau, t, Gexp, par['plateau'], estimateError=True)
-				
+	if len(tau) > 1:
+		indx       = np.argsort(tau)
+		tau        = tau[indx]
 		tauSpacing = tau[1:]/tau[:-1]
-		itry      += 1
+		itry       = 0
+
+		if par['plateau']:
+			g[:-1] = g[indx]
+		else:
+			g      = g[indx]
+
+		while min(tauSpacing) < par['minTauSpacing'] and itry < 3:
+			print("\tTau Spacing < minTauSpacing")
+
+			imode   = np.argmin(tauSpacing)      # merge modes imode and imode + 1	
+			tau     = mergeModes_magic(g, tau, imode)
+
+			g, tau, dtau  = FineTuneSolution(tau, t, Gexp, par['plateau'], estimateError=True)
+
+			tauSpacing = tau[1:]/tau[:-1]
+			itry      += 1
 
 
-	if par['plateau']:
-		G0 = g[-1]
-		g  = g[:-1]
+		if par['plateau']:
+			G0 = g[-1]
+			g  = g[:-1]
 
 	if par['verbose']:
 		print('(*) Number of optimum nodes = {0:d}'.format(len(g)))
