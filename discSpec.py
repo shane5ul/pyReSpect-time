@@ -34,13 +34,15 @@ def initializeDiscSpec(par):
 	ns   = len(s);
 	
 	# range of N scanned
-	if(par['MaxNumModes'] == 0):
-		Nmax  = min(np.floor(3.0 * np.log10(max(t)/min(t))),n/4); # maximum Nopt
-		Nmin  = max(np.floor(0.5 * np.log10(max(t)/min(t))),2);   # minimum Nopt
-		Nv    = np.arange(Nmin, Nmax + 1).astype(int)
-	else:
-		Nv    = np.arange(par['MaxNumModes'], par['MaxNumModes'] + 1).astype(int)
+	Nmin  = max(np.floor(0.5 * np.log10(max(t)/min(t))),2);   # minimum Nopt
+	Nmax  = min(np.floor(3.0 * np.log10(max(t)/min(t))),n/4); # maximum Nopt
 
+	if(par['MaxNumModes'] > 0):
+		Nmax  = min(Nmax, par['MaxNumModes']
+	
+	Nv    = np.arange(Nmin, Nmax + 1).astype(int)
+
+		
 	# Estimate Error Weight from Continuous Curve Fit
 	kernMat = getKernMat(s,t)
 	
