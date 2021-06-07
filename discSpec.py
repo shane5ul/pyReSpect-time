@@ -38,7 +38,7 @@ def initializeDiscSpec(par):
 	Nmax  = min(np.floor(3.0 * np.log10(max(t)/min(t))),n/4); # maximum Nopt
 
 	if(par['MaxNumModes'] > 0):
-		Nmax  = min(Nmax, par['MaxNumModes']
+		Nmax  = min(Nmax, par['MaxNumModes'])
 	
 	Nv    = np.arange(Nmin, Nmax + 1).astype(int)
 
