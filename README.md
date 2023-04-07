@@ -95,4 +95,3 @@ The code is based on the Matlab program [ReSpect](https://www.mathworks.com/matl
 + some printing modifications
 + hardcoding prune = True everywhere; doesn't seem to be use case otherwise
 + making jupyter interact compliant
-
