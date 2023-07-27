@@ -20,7 +20,7 @@ In addition to the python modules, a jupyter notebook `interactContSpec.ipynb` i
 The user is expected to supply two files:
 
 + `inp.dat` is used to control parameters and settings
-+ `Gt.dat` which contains two columns of data `t` and `G(t)`
++ `Gt.dat` which contains two columns of data `t` and `G(t)` [July 2023: optional third column specifying weight of datapoints]
 
 ### Output Files
 
@@ -53,9 +53,9 @@ The interactive mode offers a "GUI" for exploring parameter settings. To launch 
 
 The numbers in parenthesis show the version this has been tested on. 
 
-python3 (3.5.2)
-numpy (1.14.2)
-scipy (1.0.1)
+python3 (3.8)
+numpy (1.23)
+scipy (1.3)
 
 For interactive mode:
 
