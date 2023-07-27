@@ -76,31 +76,57 @@ def GetExpData(fname):
 
 	"""Function: GetExpData(input)
 	   Reads in the experimental data from the input file
+
+	   7/27/2023: allowing for optional "weight" column to be specified
+	              to weigh the relative importance of datapoints [assume 1 if not specified]
+
 	   Input:  fname = name of file that contains G(t) in 2 columns [t Gt]
-	   Output: A n*1 vector "t", and a n*1 vector Gt"""
+	                   or 3 columns [t Gt wt]
+	   Output: A n*1 vector "t", a n*1 vector Gt, and a n*1 vector wG"""
 	   
 	try:
-		to, Gto = np.loadtxt(fname, unpack=True)  # 2 columns, t - Gt
+
+		data = np.loadtxt(fname)
+		cols = data.shape[1]		# number of columns in data file
+
+		# if only 2 columns, then set weights to 1.0
+		if cols == 2:
+			to  = data[:,0]
+			Gto = data[:,1]
+		else:
+			to   = data[:,0]
+			Gto  = data[:,1]
+			wGo  = data[:,2]
+
+		# to, Gto = np.loadtxt(fname, unpack=True)  # 2 columns, t - Gt
+
 	except OSError:
 		print('*Error*: G(t) data file is either not in the correct path, or incorrectly formatted')
 		quit()
+
 	#
 	# any repeated "time" values
 	#
-	
 	to, indices = np.unique(to, return_index = True)	
 	Gto         = Gto[indices]
 
+	if cols == 3:
+		wGo     = wGo[indices]
+
+	#
+	# if three columns are provided then assume that the data is preprocessed
+	# and it does not need any interpolation; 
 	#
 	# Sanitize the input by spacing it out. Using linear interpolation
 	#
-	
-	f  =  interp1d(to, Gto, fill_value="extrapolate")
-	t  =  np.logspace(np.log10(np.min(to)), np.log10(np.max(to)), max(len(to),100))		
-	Gt =  f(t)
+	if cols == 2:
+		f  =  interp1d(to, Gto, fill_value="extrapolate")
+		t  =  np.geomspace(np.min(to), np.max(to), 100)		
+		Gt =  f(t)
 
-
-	return t, Gt
+		return t, Gt, np.ones(len(Gt))
+	else:
+		return to, Gto, wGo
 
 def getKernMat(s, t):
 	"""furnish kerMat() which helps faster kernel evaluation
