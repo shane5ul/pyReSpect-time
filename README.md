@@ -81,7 +81,7 @@ The code is based on the Matlab program [ReSpect](https://www.mathworks.com/matl
 ### Major Upgrade: August 2018
 
 #### Continuous Spectrum
-+ orignal program with n = 100 and lambda = 20 pts with clean 1 mode data took ~33s.
++ original program with n = 100 and lambda = 20 pts with clean 1 mode data took ~33s.
 + prestore kernMat: evaluation of kernel (meshgrid S, T, and hs) by prestoring kernMat ~12.5s (~3x speed gain)
 + improved least_squares setting by incorporating jacobianLM; ~6s (2x gain)
 + lcurve coarser (auto) mesh, robust criterion, and interpolation ~3.5s (~1.75x gain)
