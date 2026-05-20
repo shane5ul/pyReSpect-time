@@ -6,11 +6,11 @@ A rewrite of the python classic library for extracting continuous and discrete r
 
 The method solves the regularized inverse problem
 
-$$G(t) = G_0 + \int_{0}^{\infty} H(s)\, e^{-t/s}\, d\ln s$$
+$$G(t) = G_0 + \int_{-\infty}^{\infty} H(s) e^{-t/s}\ d\ln s$$
 
 to recover the continuous relaxation spectrum $H(s)$, and subsequently fits a discrete Maxwell model
 
-$$G(t) = G_0 + \sum_i^{N} g_i\, e^{-t/\tau_i}$$
+$$G(t) = G_0 + \sum_{i=1}^{N} g_i e^{-t/\tau_i}$$
 
 where $N$ is selected via an information criterion.
 
@@ -151,35 +151,6 @@ n_resample = 50
 
 ---
 
-## Theory
-
-### Continuous spectrum
-
-The relaxation modulus is related to the continuous spectrum $H(s)$ via
-
-$$G(t) = \int_{-\infty}^{\infty} H(s)\, e^{-t/s}\, d\ln s$$
-
-Recovering $H(s)$ from discrete, noisy $G(t)$ measurements is an ill-posed inverse problem. pyReSpect solves the Tikhonov-regularized problem
-
-$$\min_{H} \left\| w \cdot \frac{G(t) - \mathcal{K}[H](t)}{G(t)} \right\|^2 + \lambda \| L H \|^2$$
-
-where $L$ is the second-difference matrix (curvature penalty) and $\lambda$ is the regularization parameter. The optimal $\lambda$ is determined via a Bayesian L-curve method that maximizes the log-evidence $\log p(\lambda)$.
-
-### Discrete spectrum
-
-Given $H(s)$, a discrete Maxwell model
-
-$$G(t) = \sum_{i=1}^{N} g_i\, e^{-t/\tau_i} + G_0$$
-
-is fitted by:
-
-1. Distributing $N$ candidate $\tau_i$ points according to a density derived from $H(s)$
-2. Solving a non-negative least squares (NNLS) problem for the weights $g_i$
-3. Selecting the optimal $N$ by minimizing the Akaike Information Criterion (AIC)
-4. Fine-tuning $\tau_i$ positions via non-linear least squares (NLLS)
-
----
-
 ## API reference
 
 ### `ReSpect`
@@ -240,7 +211,7 @@ If you use pyReSpect in your research, please cite:
 }
 
 @article{takeh2013computer,
-  author  = {Takeh, Arash and Shanbhag, Sachin},
+  author  = {Takeh, Arsia and Shanbhag, Sachin},
   title   = {A computer program to extract the continuous and discrete
              relaxation spectra from dynamic viscoelastic measurements},
   journal = {Applied Rheology},
