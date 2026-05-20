@@ -1,4 +1,4 @@
-# pyReSpect-time
+# pyReSpect-time-2.0
 
 A rewrite of the python classic library for extracting continuous and discrete relaxation spectra from stress relaxation data $G(t)$. The core algorithms are the same, the interface (both developer and user) is modernized.
 
