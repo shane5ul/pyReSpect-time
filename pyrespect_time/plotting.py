@@ -103,18 +103,24 @@ def plot(
             figs.append(fig)
             if toFile:
                 _save_fig(fig, path, "Gfit.pdf")
+            else:
+                plt.show()
 
         elif token == "full":
             fig1 = _plot_base(t, Gt, cont_result, disc_result)
             figs.append(fig1)
             if toFile:
                 _save_fig(fig1, path, "Gfit.pdf")
+            else:
+                plt.show()
 
             fig2 = _plot_diagnostics(cont_result, disc_result)
             figs.append(fig2)
             if toFile:
                 _save_fig(fig2, path, "diagnostics.pdf")
-
+            else:
+                plt.show()
+                
     return figs
 
 

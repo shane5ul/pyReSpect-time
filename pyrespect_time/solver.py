@@ -197,7 +197,7 @@ class ReSpect:
         self,
         which:  Union[str, list[str]] = "base",
         toFile: bool                  = False,
-        path:   str                   = "output/",
+        path:   str                   = "./",
     ) -> list:
         """Plot the fitted spectra.
 
@@ -217,7 +217,7 @@ class ReSpect:
             Default: False.
         path : str, optional
             Output directory for figures when toFile=True.
-            Default: ``"output/"``.
+            Default: ``"./"``.
 
         Returns
         -------
