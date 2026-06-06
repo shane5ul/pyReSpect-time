@@ -1,10 +1,10 @@
 # pyReSpect-time-2.0
 
-A rewrite of the python classic library for extracting continuous and discrete relaxation spectra from stress relaxation data $G(t)$. The core algorithms are the same, the interface (both developer and user) is modernized.
+A rewrite of the classic python library for extracting continuous and discrete relaxation spectra from stress relaxation data $G(t)$. The core algorithms are the same. The interface (both developer and user) is modernized.
 
-**If you need the legacy codebase has been archived at github.com/shane5ul/pyReSpect-time-legacy.**
+**If you need the legacy codebase, it is archived at github.com/shane5ul/pyReSpect-time-legacy.**
 
-The method solves the regularized inverse problem
+pyReSpect solves the regularized inverse problem
 
 $$G(t) = G_0 + \int_{-\infty}^{\infty} H(s) e^{-t/s}\ d\ln s$$
 
@@ -59,7 +59,7 @@ Clone the repository and install in editable mode from the repo root:
 
 ```bash
 git clone https://github.com/shane5ul/pyReSpect-time.git
-cd pyrespect
+cd pyReSpect-time
 pip install -e .
 ```
 
@@ -68,7 +68,7 @@ pip install -e .
 ## Quick start
 
 ```python
-from pyrespect import ReSpect, ReSpectConfig
+from pyrespect_time import ReSpect, ReSpectConfig
 
 # Default settings — fit from a data file
 solver = ReSpect()
