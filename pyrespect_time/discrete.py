@@ -272,7 +272,7 @@ def _nn_lls(
     # Weight the system: minimizes w*(Kg/Gexp - 1)^2
     Kp      = (wexp / Gexp).reshape(-1, 1) * K
     cond_Kp = np.linalg.cond(Kp)
-    g       = nnls(Kp, wexp)[0]
+    g       = nnls(Kp, wexp, maxiter=100000)[0]
 
     G_model = K @ g
     error   = float(np.sum((wexp * (G_model / Gexp - 1.0)) ** 2))
