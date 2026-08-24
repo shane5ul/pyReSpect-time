@@ -124,7 +124,11 @@ def fit_discrete(
     if config.max_num_modes is not None:
         N_max = min(N_max, config.max_num_modes)
 
-    Nv   = np.arange(N_min, N_max + 1, dtype=int)
+    if N_max > N_min:
+        Nv   = np.arange(N_min, N_max + 1, dtype=int)
+    else:
+        Nv   = np.arange(N_max, N_max + 1).astype(int)
+
     npts = len(Nv)
 
     # ------------------------------------------------------------------
@@ -178,19 +182,20 @@ def fit_discrete(
     g, tau, dtau = _fine_tune(tau, t, Gt, weights, config.plateau,
                                estimate_error=True)
 
+    # sort modes
+    indx = np.argsort(tau)
+    tau  = tau[indx]
+    if config.plateau:
+        g[:-1] = g[indx]
+    else:
+        g = g[indx]
+
     # ------------------------------------------------------------------
-    # Merge modes that are too close
+    # Merge modes that are too close if N > 1
     # ------------------------------------------------------------------
     if len(tau) > 1:
-        indx         = np.argsort(tau)
-        tau          = tau[indx]
         tau_spacing  = tau[1:] / tau[:-1]
         itry         = 0
-
-        if config.plateau:
-            g[:-1] = g[indx]
-        else:
-            g = g[indx]
 
         while np.min(tau_spacing) < config.min_tau_spacing and itry < 3:
             imode        = np.argmin(tau_spacing)
@@ -409,7 +414,7 @@ def _grid_density(
     pint = pint / ci[-1]
     ci   = ci   / ci[-1]
 
-    alfa    = 1.0 / (N - 1)
+    alfa    = 1.0 / max((N - 1), 1)
     zij     = np.zeros(N + 1)
     z       = np.zeros(N)
     z[0]    = x.min()
