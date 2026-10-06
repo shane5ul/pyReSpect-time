@@ -1,27 +1,36 @@
 [build-system]
-requires = ["hatchling"] 
+requires      = ["hatchling"]
 build-backend = "hatchling.build"
 
-
 [project]
-name = "pyrespect_time"
-version = "2.0"
+name        = "pyrespect_time"
+dynamic     = ["version"]
 description = "Extract continuous and discrete relaxation spectra from G(t) data"
-readme = "README.md"
-license = { text = "MIT" }
-authors = [
+readme      = "README.md"
+license     = { text = "MIT" }
+authors     = [
     { name = "Sachin Shanbhag", email = "shane5ul@gmail.com" }
 ]
 requires-python = ">=3.12"
+
 dependencies = [
     "numpy>=2.4",
     "scipy>=1.17",
     "matplotlib",
 ]
 
-[tool.hatch.build.targets.wheel]
-packages = ["pyrespect_time"]
-
+[project.optional-dependencies]
+yaml = ["pyyaml"]      # only needed for ReSpectConfig.from_yaml()
+test = ["pytest"]
 
 [project.urls]
 Repository = "https://github.com/shane5ul/pyReSpect-time"
+
+[tool.hatch.version]
+path = "pyrespect_time/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pyrespect_time"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,44 +1,41 @@
 """
-io.py — Data loading and file output for pyReSpect.
+io.py — Data loading and file output for pyReSpect-time.
 
-Handles all file I/O for the pyReSpect library, cleanly separated
-from the computation layer. No scientific computation happens here.
+All file I/O is confined here. No scientific computation happens in
+this module.
 
 Functions
 ---------
 load_data(source, weights, resample, n_resample)
-    Load experimental data from a file or numpy arrays.
+    Load G(t) data from a file, a tuple of arrays, or a 2-D array.
 
-save(path, which, t, cont_result, disc_result)
+save(which, path, t, cont_result, disc_result, plateau)
     Write results to files in the specified output directory.
 
-Private
--------
-_resample_geometric(t, Gt, n)
-    Resample data onto a geometric grid via linear interpolation.
-
-_validate_which(which, cont_result, disc_result)
-    Validate the 'which' argument and check results exist.
+The layout of this module, the names of the output files and their
+headers are deliberately the same as in pyrespect_freq.
 """
 
 from __future__ import annotations
 
 import os
-from typing import Optional, Union
+import warnings
+from typing import Optional, Sequence, Union
 
 import numpy as np
 
-from .config import ReSpectError
+from .config import ReSpectError, ReSpectWarning
 from .continuous import ContinuousResult
 from .discrete import DiscreteResult
 
 
 # Valid 'which' tokens
-_VALID_WHICH = {"base", "full"}
+_VALID_WHICH = ("base", "full")
 
-# Both tokens require both results
-_NEEDS_CONT = {"base", "full"}
-_NEEDS_DISC = {"base", "full"}
+# Number of columns in the data: without / with per-datapoint weights
+_NCOLS_RAW      = 2
+_NCOLS_WEIGHTED = 3
+_COLUMNS_DOC    = "2 columns [t, G(t)] or 3 columns [t, G(t), weights]"
 
 
 # ---------------------------------------------------------------------------
@@ -46,41 +43,41 @@ _NEEDS_DISC = {"base", "full"}
 # ---------------------------------------------------------------------------
 
 def load_data(
-    source:     Union[str, tuple],
-    weights:    Optional[np.ndarray] = None,
-    resample:   bool                 = True,
-    n_resample: int                  = 100,
+    source:           Union[str, os.PathLike, Sequence, np.ndarray],
+    weights:          Optional[np.ndarray] = None,
+    resample:         bool                 = True,
+    n_resample:       int                  = 100,
+    warn_if_not_resampled: bool            = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load experimental stress relaxation data.
 
-    Accepts either a file path or a pair of numpy arrays. Optionally
-    resamples the data onto a geometrically-spaced grid (opt-out via
-    resample=False).
-
     Parameters
     ----------
-    source : str or (np.ndarray, np.ndarray)
-        Either:
-        - A path to a data file with 2 columns [t, G(t)] or
-          3 columns [t, G(t), weights].
-        - A tuple (t, Gt) of numpy arrays.
+    source : path, sequence of arrays, or 2-D array
+        One of:
+
+        - A path to a text file with 2 columns ``[t, G(t)]`` or
+          3 columns ``[t, G(t), weights]``.
+        - A sequence ``(t, Gt)`` or ``(t, Gt, weights)`` of 1-D arrays.
+        - A 2-D array with the same column layout as the file.
+
     weights : np.ndarray or None, optional
-        Per-datapoint weights. Only used when source is a tuple.
-        Ignored when source is a 3-column file (weights are read
-        from the file). If None and source is a 2-column file or
-        tuple, weights default to 1.0.
+        Per-datapoint weights, shape (n,). An alternative to supplying
+        them as the third column / third array of *source*.
     resample : bool, optional
-        If True (default), resample 2-column file data or tuple data
-        onto a geometric grid of n_resample points. Has no effect on
-        3-column file data, which is assumed to be pre-processed.
+        If True (default), resample the data onto a geometric grid of
+        *n_resample* points. Data that come with weights are treated as
+        pre-processed and are never resampled.
     n_resample : int, optional
         Number of points for geometric resampling. Default: 100.
-        Only used when resample=True.
+    warn_if_not_resampled : bool, optional
+        Emit a ReSpectWarning when *resample* is True but resampling is
+        skipped because weights were supplied.
 
     Returns
     -------
     t : np.ndarray, shape (n,)
-        Time points.
+        Time points, increasing, without duplicates.
     Gt : np.ndarray, shape (n,)
         Relaxation modulus G(t).
     w : np.ndarray, shape (n,)
@@ -89,38 +86,46 @@ def load_data(
     Raises
     ------
     ReSpectError
-        If the file cannot be read, is incorrectly formatted, or the
-        array shapes are inconsistent.
+        If the source cannot be read or is incorrectly formatted.
     """
-    if isinstance(source, str):
-        t, Gt, w, is_preprocessed = _load_from_file(source)
-    elif isinstance(source, tuple) and len(source) == 2:
-        t, Gt = source
-        t     = np.asarray(t,  dtype=float)
-        Gt    = np.asarray(Gt, dtype=float)
+    cols = _get_columns(source)
 
-        if t.shape != Gt.shape or t.ndim != 1:
+    t, Gt = cols[0], cols[1]
+    wt    = cols[2] if len(cols) == _NCOLS_WEIGHTED else None
+
+    if weights is not None:
+        if wt is not None:
             raise ReSpectError(
-                "When source is a tuple, t and Gt must be 1-D arrays "
-                "of the same length."
+                "Weights were supplied twice: once with the data and once "
+                "through the 'weights' argument."
+            )
+        wt = np.asarray(weights, dtype=float)
+        if wt.shape != t.shape:
+            raise ReSpectError(
+                f"weights must have the same shape as t {t.shape}; "
+                f"got {wt.shape}."
             )
 
-        w               = (np.asarray(weights, dtype=float)
-                           if weights is not None
-                           else np.ones(len(t)))
-        is_preprocessed = False
-    else:
-        raise ReSpectError(
-            "source must be a file path (str) or a tuple (t, Gt) of "
-            "numpy arrays."
+    # Sort by t and remove duplicate time values
+    t, idx = np.unique(t, return_index=True)
+    Gt     = Gt[idx]
+    if wt is not None:
+        wt = wt[idx]
+
+    # Data with weights are treated as pre-processed: never resampled
+    if wt is None:
+        if resample:
+            t, Gt = _resample_geometric(t, Gt, n_resample)
+        wt = np.ones(len(t))
+    elif resample and warn_if_not_resampled:
+        warnings.warn(
+            "resample=True was ignored because weights were supplied; "
+            "data with weights are used as-is.",
+            ReSpectWarning,
+            stacklevel=3,
         )
 
-    # Resample unless the data is pre-processed (3-column file)
-    if resample and not is_preprocessed:
-        t, Gt = _resample_geometric(t, Gt, n_resample)
-        w     = np.ones(len(t))         # weights reset after resampling
-
-    return t, Gt, w
+    return t, Gt, wt
 
 
 # ---------------------------------------------------------------------------
@@ -128,96 +133,105 @@ def load_data(
 # ---------------------------------------------------------------------------
 
 def save(
-    path:        str,
     which:       Union[str, list[str]],
+    path:        Union[str, os.PathLike],
     t:           np.ndarray,
     cont_result: Optional[ContinuousResult] = None,
     disc_result: Optional[DiscreteResult]   = None,
+    plateau:     bool                       = False,
 ) -> None:
     """Write results to files in the specified output directory.
 
     Parameters
     ----------
-    path : str
-        Output directory. Created if it does not exist.
     which : str or list of str
         Which outputs to write. Valid values:
 
-        - ``"base"`` : crs.dat (exp(H)), drs.dat (g, tau), and Gfit.dat 
-                       Gfit.dat contains three columns: (t, Gt_crs, Gt_drs).
-                       
+        - ``"base"`` : crs.dat, drs.dat, Gfit.dat.
         - ``"full"`` : above + rho-eta.dat, logPlam.dat, aic.dat.
-                       Diagnostic files are silently skipped if the L-curve
-                       was not computed (i.e. lam_C was pre-specified).
+          The two L-curve files are skipped when lam_C was pre-specified.
 
+    path : str or path-like
+        Output directory. Created if it does not exist.
     t : np.ndarray, shape (n,)
-        Experimental time points.
+        Experimental time points (needed to write Gfit.dat).
     cont_result : ContinuousResult or None
-        Required for both tokens.
     disc_result : DiscreteResult or None
-        Required for both tokens.
+    plateau : bool
+        If True, the fitted G0 is recorded in the headers of crs.dat
+        and drs.dat.
 
     Raises
     ------
     ReSpectError
-        If a requested output requires a result that has not been computed,
-        or if an invalid 'which' token is supplied.
+        If a requested output requires a result that has not been
+        computed, or an invalid 'which' token is supplied.
     """
     tokens = _parse_which(which)
     _validate_which(tokens, cont_result, disc_result)
     os.makedirs(path, exist_ok=True)
 
-    for token in tokens:
-
-        if token == "base":
-            _write_base(path, t, cont_result, disc_result)
-
-        elif token == "full":
-            _write_base(path, t, cont_result, disc_result)
-            _write_full(path, cont_result, disc_result)
+    _write_base(path, t, cont_result, disc_result, plateau)
+    if "full" in tokens:
+        _write_full(path, cont_result, disc_result)
 
 
 # ---------------------------------------------------------------------------
-# Private: file loading
+# Private: loading helpers
 # ---------------------------------------------------------------------------
 
-def _load_from_file(
-    fname: str,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, bool]:
-    """Load data from a 2- or 3-column text file.
+def _get_columns(source) -> list[np.ndarray]:
+    """Turn any accepted *source* into a list of 1-D float columns."""
+    if isinstance(source, (str, os.PathLike)):
+        fname = os.fspath(source)
+        try:
+            data = np.loadtxt(fname)
+        except (OSError, ValueError):
+            raise ReSpectError(
+                f"Could not read data file '{fname}'. "
+                "Check that the path is correct and the file is properly "
+                "formatted."
+            ) from None
+        where = f"Data file '{fname}'"
 
-    Returns
-    -------
-    t, Gt, w : np.ndarray
-    is_preprocessed : bool
-        True for 3-column files (weights supplied; no resampling needed).
-    """
-    try:
-        data = np.loadtxt(fname)
-    except OSError:
-        raise ReSpectError(
-            f"Could not read data file '{fname}'. "
-            "Check that the path is correct and the file is properly formatted."
-        )
+    elif isinstance(source, np.ndarray):
+        data  = np.asarray(source, dtype=float)
+        where = "A data array"
 
-    if data.ndim != 2 or data.shape[1] not in (2, 3):
-        raise ReSpectError(
-            f"Data file '{fname}' must have 2 columns [t, G(t)] "
-            "or 3 columns [t, G(t), weights]."
-        )
+    elif isinstance(source, (tuple, list)):
+        cols = [np.asarray(c, dtype=float) for c in source]
+        if len(cols) not in (_NCOLS_RAW, _NCOLS_WEIGHTED):
+            raise ReSpectError(
+                f"A tuple source must have length {_NCOLS_RAW} (t, Gt) or "
+                f"{_NCOLS_WEIGHTED} (t, Gt, weights); got {len(cols)}."
+            )
+        _check_shapes(*cols)
+        return cols
 
-    t   = data[:, 0]
-    Gt  = data[:, 1]
-
-    # Remove duplicate time values
-    t, idx = np.unique(t, return_index=True)
-    Gt     = Gt[idx]
-
-    if data.shape[1] == 3:
-        w = data[:, 2][idx]
-        return t, Gt, w, True       # pre-processed; skip resampling
     else:
-        return t, Gt, np.ones(len(t)), False
+        raise ReSpectError(
+            "source must be a file path, a tuple of 1-D arrays, or a "
+            f"2-D array with {_COLUMNS_DOC}."
+        )
+
+    if data.ndim != 2 or data.shape[1] not in (_NCOLS_RAW, _NCOLS_WEIGHTED):
+        raise ReSpectError(f"{where} must have {_COLUMNS_DOC}.")
+
+    return [data[:, j] for j in range(data.shape[1])]
+
+
+def _check_shapes(*arrays: np.ndarray) -> None:
+    """Raise ReSpectError if arrays are not all 1-D and the same length."""
+    shapes = [a.shape for a in arrays]
+    if any(a.ndim != 1 for a in arrays):
+        raise ReSpectError(
+            f"All input arrays must be 1-D; got shapes {shapes}."
+        )
+    if len(set(shapes)) > 1:
+        raise ReSpectError(
+            f"All input arrays must have the same length; "
+            f"got shapes {shapes}."
+        )
 
 
 def _resample_geometric(
@@ -228,116 +242,89 @@ def _resample_geometric(
     """Resample (t, Gt) onto n geometrically-spaced time points.
 
     Uses linear interpolation. The resampled grid spans [t_min, t_max].
-
-    Parameters
-    ----------
-    t : np.ndarray, shape (m,)
-    Gt : np.ndarray, shape (m,)
-    n : int
-        Number of output points.
-
-    Returns
-    -------
-    t_new : np.ndarray, shape (n,)
-    Gt_new : np.ndarray, shape (n,)
     """
     from scipy.interpolate import interp1d
 
     f      = interp1d(t, Gt, fill_value='extrapolate')
     t_new  = np.geomspace(t.min(), t.max(), n)
-    Gt_new = f(t_new)
 
-    return t_new, Gt_new
+    return t_new, f(t_new)
 
 
 # ---------------------------------------------------------------------------
 # Private: write helpers
 # ---------------------------------------------------------------------------
 
+def _header(columns: str, G0: Optional[float] = None) -> str:
+    """File header: optional 'G0 = ...' line, then the column names."""
+    if G0 is None:
+        return columns
+    return f"G0 = {G0:.6e}\n{columns}"
+
+
 def _write_base(
-    path:        str,
+    path:        Union[str, os.PathLike],
     t:           np.ndarray,
     cont_result: ContinuousResult,
     disc_result: DiscreteResult,
+    plateau:     bool,
 ) -> None:
-    """Write crs.dat, drs.dat, and combined Gfit.dat.
+    """Write crs.dat, drs.dat, and Gfit.dat."""
 
-    Gfit.dat columns: t, G_continuous, G_discrete.
-    crs.dat and drs.dat include a G0 header line when plateau is active.
-    """
-    # crs.dat: [s, exp(H)] with optional G0 header
-    h_path = os.path.join(path, "crs.dat")
-    if cont_result.G0 is not None:
-        np.savetxt(
-            h_path,
-            np.c_[cont_result.s, np.exp(cont_result.H)],
-            fmt='%e',
-            header=f'G0 = {cont_result.G0:.6e}',
-        )
-    else:
-        np.savetxt(
-            h_path,
-            np.c_[cont_result.s, np.exp(cont_result.H)],
-            fmt='%e',
-        )
+    # crs.dat: [s, exp(H(s))]
+    np.savetxt(
+        os.path.join(path, "crs.dat"),
+        np.c_[cont_result.s, np.exp(cont_result.H)],
+        fmt="%e",
+        header=_header("s  h", cont_result.G0 if plateau else None),
+    )
 
-    # dmodes.dat: [g, tau, dtau] with optional G0 header
-    dmodes_path = os.path.join(path, "drs.dat")
-    if disc_result.G0 is not None:
-        np.savetxt(
-            dmodes_path,
-            np.c_[disc_result.g, disc_result.tau, disc_result.dtau],
-            fmt='%e',
-            header=f'G0 = {disc_result.G0:.6e}',
-        )
-    else:
-        np.savetxt(
-            dmodes_path,
-            np.c_[disc_result.g, disc_result.tau, disc_result.dtau],
-            fmt='%e',
-        )
+    # drs.dat: [g_i, tau_i, dtau_i]
+    np.savetxt(
+        os.path.join(path, "drs.dat"),
+        np.c_[disc_result.g, disc_result.tau, disc_result.dtau],
+        fmt="%e",
+        header=_header("g  tau  dtau", disc_result.G0 if plateau else None),
+    )
 
-    # Gfit.dat: [t, G_continuous, G_discrete]
+    # Gfit.dat: [t, G_cont, G_disc]
     np.savetxt(
         os.path.join(path, "Gfit.dat"),
         np.c_[t, cont_result.G_fit, disc_result.G_fit],
-        fmt='%e',
-        header='t G_continuous G_discrete',
+        fmt="%e",
+        header="t  G_cont  G_disc",
     )
 
 
 def _write_full(
-    path:        str,
+    path:        Union[str, os.PathLike],
     cont_result: ContinuousResult,
     disc_result: DiscreteResult,
 ) -> None:
-    """Write diagnostic files: rho-eta.dat, logPlam.dat, aic.dat.
+    """Write rho-eta.dat, logPlam.dat, aic.dat."""
 
-    L-curve files (rho-eta.dat, logPlam.dat) are silently
-    skipped when lam_C was pre-specified and the L-curve was not computed.
-    """
-    # L-curve diagnostics — only available when lam_C was auto-determined
+    # L-curve files only available when lam_C was auto-determined
     if cont_result.lam is not None:
-
-        # rho-eta.dat: [lam, rho, eta]
         np.savetxt(
             os.path.join(path, "rho-eta.dat"),
             np.c_[cont_result.lam, cont_result.rho, cont_result.eta],
-            fmt='%e',
+            fmt="%e",
+            header="lambda  rho  eta",
         )
-
-        # logPlam.dat: [lam, log_P]
         np.savetxt(
             os.path.join(path, "logPlam.dat"),
             np.c_[cont_result.lam, cont_result.log_P],
-            fmt='%e',
+            fmt="%e",
+            header="lambda  logP",
         )
 
-    # aic.dat: [wt_base, N_bst, AIC_bst]
+    # AIC scan is always available
     np.savetxt(
         os.path.join(path, "aic.dat"),
-        np.c_[disc_result.wt_base, disc_result.N_bst, disc_result.AIC_bst],
-        fmt='%f\t%i\t%e',
+        np.c_[disc_result.wt_base, disc_result.N_bst,
+              disc_result.AIC_bst, disc_result.nz_N_bst],
+        fmt="%f\t%i\t%e\t%i",
+        header="wt_base  N_bst  AIC  nz_N_bst",
     )
 
 
@@ -347,18 +334,13 @@ def _write_full(
 
 def _parse_which(which: Union[str, list[str]]) -> list[str]:
     """Normalise 'which' to a list of strings and validate tokens."""
-    if isinstance(which, str):
-        tokens = [which]
-    else:
-        tokens = list(which)
-
-    invalid = set(tokens) - _VALID_WHICH
+    tokens  = [which] if isinstance(which, str) else list(which)
+    invalid = [tok for tok in tokens if tok not in _VALID_WHICH]
     if invalid:
         raise ReSpectError(
             f"Invalid 'which' value(s): {invalid}. "
-            f"Must be one or more of {_VALID_WHICH}."
+            f"Must be one of {list(_VALID_WHICH)}."
         )
-
     return tokens
 
 
@@ -368,14 +350,8 @@ def _validate_which(
     disc_result: Optional[DiscreteResult],
 ) -> None:
     """Raise ReSpectError if a requested output's result is missing."""
-    for token in tokens:
-        if token in _NEEDS_CONT and cont_result is None:
-            raise ReSpectError(
-                f"'{token}' requires a continuous spectrum result, "
-                "but none is available. Run fit() first."
-            )
-        if token in _NEEDS_DISC and disc_result is None:
-            raise ReSpectError(
-                f"'{token}' requires a discrete spectrum result, "
-                "but none is available. Run fit() first."
-            )
+    if tokens and (cont_result is None or disc_result is None):
+        raise ReSpectError(
+            f"'{tokens[0]}' requires fitted spectra, but none are "
+            "available. Run fit() first."
+        )

@@ -7,3 +7,9 @@ test4: Symmetric Star Theory
 test5: Slip Link Simulation of Binary Linear Blend
 test6: Experimental data on Ring Polymers
 test7: test3 with artificially added G0 = 10.0
+
+Automated tests (run "pytest" from the repository root):
+
+test_regression.py: fits every data file above and compares with baseline/*.npz
+test_interface.py : checks the public interface, shared with the sister package
+make_baseline.py  : regenerates baseline/ after an intentional numerical change

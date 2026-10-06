@@ -1,145 +1,178 @@
 """
-solver.py — The primary public API for pyReSpect.
+solver.py — ReSpect: the primary user-facing solver class.
 
-The ReSpect class is the single entry point for users. It orchestrates
-data loading, continuous and discrete spectrum fitting, file output,
-and plotting.
+    from pyrespect_time import ReSpect, ReSpectConfig
 
-Typical usage
--------------
-    from pyrespect import ReSpect, ReSpectConfig
+    solver = ReSpect()                      # or ReSpect(ReSpectConfig(...))
+    solver.fit("Gt.dat")                    # or solver.fit(t, Gt)
 
-    # Default configuration
-    solver = ReSpect()
-    solver.fit("Gt.dat")
+    solver.continuous.H        # continuous spectrum H(s)
+    solver.continuous.G_fit    # predicted G(t) from the CRS
+    solver.discrete.tau        # discrete relaxation times
+    solver.discrete.G_fit      # predicted G(t) from the DRS
 
-    # Custom configuration, data as arrays
-    config = ReSpectConfig(ns=200, plateau=True, freq_end="neutral")
-    solver = ReSpect(config)
-    solver.fit(t, Gt)
+    solver.save(which="full", path="output/")
+    figs = solver.plot(which="base")
 
-    # Access results
-    print(solver.continuous.H)
-    print(solver.discrete.tau)
+fit() and save() return the solver, so they can be chained:
 
-    # Save and plot
-    solver.save("output/", which=["base"]) or which="full" for diagnostics
-    figs = solver.plot(which=["base"], toFile=True, path="output/")
+    ReSpect().fit("Gt.dat").save(which="base", path="output/")
+
+The interface is the same as that of pyrespect_freq.ReSpect; only the
+data passed to fit() differ.
 """
 
 from __future__ import annotations
 
-from typing import Optional, Union
+import functools
+import os
+import warnings
+from typing import Optional, Sequence, Union
 
 import numpy as np
 
 from .config import ReSpectConfig, ReSpectError
 from .continuous import ContinuousResult, fit_continuous
 from .discrete import DiscreteResult, fit_discrete
-from .io import load_data, save as _save
+from .io import load_data, save as _save, _VALID_WHICH
 from .plotting import plot as _plot
 
 
+def _accept_legacy_save_order(method):
+    """Accept the pre-2.1 positional call ``save(path[, which])``.
+
+    Before version 2.1 the signature was ``save(path, which="base")``. A
+    first positional argument that is not a valid 'which' token is
+    therefore taken to be the output directory, with a DeprecationWarning.
+    """
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        if (
+            args
+            and isinstance(args[0], (str, os.PathLike))
+            and args[0] not in _VALID_WHICH
+        ):
+            warnings.warn(
+                "save(path, which) is deprecated; the argument order is now "
+                "save(which, path), as in pyrespect_freq. Use keywords: "
+                "save(which='base', path='output/').",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            which = args[1] if len(args) > 1 else kwargs.get("which", "base")
+            return method(self, which=which, path=args[0])
+        return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class ReSpect:
-    """Continuous and discrete relaxation spectrum solver.
+    """Solver for extracting continuous and discrete relaxation spectra
+    from time-domain G(t) data.
 
     Parameters
     ----------
-    config : ReSpectConfig or None, optional
-        Configuration object. If None, default ReSpectConfig() is used.
+    config : ReSpectConfig, optional
+        Solver configuration. Defaults to ReSpectConfig() if not supplied.
 
     Attributes
     ----------
+    config : ReSpectConfig
+        The active configuration.
     continuous : ContinuousResult or None
         Results from the continuous spectrum fit. None until fit() is called.
     discrete : DiscreteResult or None
         Results from the discrete spectrum fit. None until fit() is called.
     t : np.ndarray or None
-        Time points used in the fit. None until fit() is called.
+        Time points used in the fit (after any resampling).
     Gt : np.ndarray or None
-        Experimental G(t) used in the fit. None until fit() is called.
+        G(t) data used in the fit.
     weights : np.ndarray or None
-        Per-datapoint weights used in the fit. None until fit() is called.
-    config : ReSpectConfig
-        The active configuration.
+        Per-datapoint weights used in the fit.
     """
 
     def __init__(self, config: Optional[ReSpectConfig] = None) -> None:
-        self.config:     ReSpectConfig             = config or ReSpectConfig()
+        self.config:     ReSpectConfig              = config or ReSpectConfig()
         self.continuous: Optional[ContinuousResult] = None
         self.discrete:   Optional[DiscreteResult]   = None
-        self.t:          Optional[np.ndarray]        = None
-        self.Gt:         Optional[np.ndarray]        = None
-        self.weights:    Optional[np.ndarray]        = None
+        self.t:          Optional[np.ndarray]       = None
+        self.Gt:         Optional[np.ndarray]       = None
+        self.weights:    Optional[np.ndarray]       = None
 
     # ------------------------------------------------------------------
-    # Primary interface
+    # Alternative constructors
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_toml(cls, path: str) -> ReSpect:
+        """Construct a ReSpect solver from a TOML configuration file."""
+        return cls(ReSpectConfig.from_toml(path))
+
+    @classmethod
+    def from_yaml(cls, path: str) -> ReSpect:
+        """Construct a ReSpect solver from a YAML configuration file."""
+        return cls(ReSpectConfig.from_yaml(path))
+
+    # ------------------------------------------------------------------
+    # fit
     # ------------------------------------------------------------------
 
     def fit(
         self,
-        source:   Union[str, np.ndarray, tuple],
+        source:   Union[str, os.PathLike, Sequence, np.ndarray],
         Gt:       Optional[np.ndarray] = None,
         weights:  Optional[np.ndarray] = None,
-        resample: bool                 = True,
-    ) -> "ReSpect":
-        """Fit the continuous and discrete relaxation spectra.
-
-        Runs fit_continuous() followed by fit_discrete(), storing results
-        as attributes. The continuous spectrum must be computed before the
-        discrete spectrum; this ordering is enforced internally.
+        resample: Optional[bool]       = None,
+    ) -> ReSpect:
+        """Load G(t) data and compute continuous then discrete spectra.
 
         Parameters
         ----------
-        source : str, np.ndarray, or (np.ndarray, np.ndarray)
-            The experimental data. Accepted forms:
+        source : path, array, or sequence of arrays
+            The experimental data, in any of these forms:
 
-            - ``"Gt.dat"``        : path to a 2- or 3-column data file.
-            - ``t``               : 1-D numpy array of time points,
-                                    in which case Gt must also be supplied.
-            - ``(t, Gt)``         : tuple of 1-D numpy arrays.
+            - ``fit("Gt.dat")`` : path to a text file with 2 columns
+              ``[t, G(t)]`` or 3 columns ``[t, G(t), weights]``.
+            - ``fit(t, Gt)`` : 1-D arrays as separate arguments.
+            - ``fit((t, Gt))`` or ``fit((t, Gt, weights))`` : a tuple of
+              1-D arrays.
+            - ``fit(data)`` : a 2-D array with the same columns as the file.
 
-        Gt : np.ndarray or None, optional
-            Relaxation modulus array. Required when source is a 1-D numpy
-            array of time points. Ignored otherwise.
-        weights : np.ndarray or None, optional
-            Per-datapoint weights. Optional for all input forms.
-            If None, weights default to 1.0 (or are read from a 3-column
-            file).
+        Gt : np.ndarray, optional
+            Relaxation modulus, when *source* is the array of time points.
+        weights : np.ndarray, optional
+            Per-datapoint weights, shape (n,). An alternative to supplying
+            them as a third column or third tuple entry. Defaults to 1.
         resample : bool, optional
-            If True (default), resample 2-column file or array data onto
-            a geometric grid of config.n_resample points. Has no effect
-            on 3-column file data.
+            Whether to resample the data onto a geometric grid of
+            ``config.n_resample`` points. Defaults to ``config.resample``.
+            Data supplied with weights are treated as pre-processed and
+            are never resampled.
 
         Returns
         -------
-        self : ReSpect
-            Returns self to allow method chaining:
-            ``solver.fit("Gt.dat").save("output/").plot()``.
+        self — supports method chaining.
 
         Raises
         ------
         ReSpectError
-            If source is a 1-D array but Gt is not supplied, or if the
-            data cannot be loaded.
+            If the data cannot be read or are inconsistently shaped.
         """
-        # Normalise source into something load_data understands
-        source = self._normalise_source(source, Gt)
+        if Gt is not None:
+            source = (source, Gt)
 
-        # Load data
         self.t, self.Gt, self.weights = load_data(
             source,
             weights=weights,
-            resample=resample,
+            resample=self.config.resample if resample is None else resample,
             n_resample=self.config.n_resample,
+            warn_if_not_resampled=resample is True,
         )
 
-        # Stage 1: continuous spectrum
         self.continuous = fit_continuous(
             self.t, self.Gt, self.weights, self.config
         )
 
-        # Stage 2: discrete spectrum (depends on continuous result)
         self.discrete = fit_discrete(
             self.t, self.Gt, self.weights, self.continuous, self.config
         )
@@ -147,186 +180,101 @@ class ReSpect:
         return self
 
     # ------------------------------------------------------------------
-    # Output methods
+    # save
     # ------------------------------------------------------------------
 
+    @_accept_legacy_save_order
     def save(
         self,
-        path:  str,
-        which: Union[str, list[str]] = "base",
-    ) -> "ReSpect":
-        """Write results to files in the specified output directory.
+        which: Union[str, list[str]]   = "base",
+        path:  Union[str, os.PathLike] = "./",
+    ) -> ReSpect:
+        """Write result files to *path*.
 
         Parameters
         ----------
-        path : str
-            Output directory. Created if it does not exist.
-        which : str or list of str, optional
-            Which outputs to write. Valid values:
-
-            - ``"base"`` : H.dat, dmodes.dat, and Gfit.dat.
-                           Gfit.dat has three columns: t, G_continuous,
-                           G_discrete.
-            - ``"full"`` : above + rho-eta.dat, logPlam.dat, Hlam.dat,
-                           aic.dat.
-
-            Default: ``"base"``.
+        which : "base" or "full"
+            ``"base"`` writes crs.dat, drs.dat, Gfit.dat.
+            ``"full"`` additionally writes rho-eta.dat, logPlam.dat, aic.dat.
+        path : str or path-like
+            Output directory (created if it does not exist).
 
         Returns
         -------
-        self : ReSpect
-            Returns self to allow method chaining.
-
-        Raises
-        ------
-        ReSpectError
-            If a requested output requires a result that has not yet
-            been computed (i.e. fit() has not been called), or if an
-            invalid 'which' token is supplied.
+        self — supports method chaining.
         """
+        self._check_fitted("save")
         _save(
-            path=path,
             which=which,
-            t=self._require_data("save"),
+            path=path,
+            t=self.t,
             cont_result=self.continuous,
             disc_result=self.discrete,
+            plateau=self.config.plateau,
         )
         return self
 
+    # ------------------------------------------------------------------
+    # plot
+    # ------------------------------------------------------------------
+
     def plot(
         self,
-        which:  Union[str, list[str]] = "base",
-        toFile: bool                  = False,
-        path:   str                   = "./",
+        which:  Union[str, list[str]]   = "base",
+        toFile: bool                    = False,
+        path:   Union[str, os.PathLike] = "./",
     ) -> list:
-        """Plot the fitted spectra.
+        """Plot spectra and diagnostics.
 
         Parameters
         ----------
-        which : str or list of str, optional
-            Which plots to produce. Valid values:
-
-            - ``"base"`` : three-panel figure — H(s), g_i/τ_i overlay,
-                           G(t) data vs continuous and discrete fits.
-            - ``"full"`` : above + diagnostic figure — log p(λ), ρ-η
-                           L-curve, and AIC scan.
-
-            Default: ``"base"``.
-        toFile : bool, optional
-            If True, save figures to path in addition to returning them.
-            Default: False.
-        path : str, optional
-            Output directory for figures when toFile=True.
-            Default: ``"./"``.
+        which : "base" or "full"
+            ``"base"`` produces a two-panel figure: exp(H(s)) with error
+            band and discrete modes (left), G(t) data vs fits (right).
+            ``"full"`` additionally produces a three-panel diagnostic
+            figure: log p(λ), ρ-η L-curve, AIC scan.
+        toFile : bool
+            If True, save figures as PDFs to *path* instead of
+            displaying them.
+        path : str or path-like
+            Output directory for PDFs (used only when toFile=True).
 
         Returns
         -------
         figs : list of matplotlib.figure.Figure
-            All figures produced, in order.
-
-        Raises
-        ------
-        ReSpectError
-            If a requested plot requires a result that has not yet been
-            computed, or if an invalid 'which' token is supplied.
+            The figures produced, base figure first.
         """
+        self._check_fitted("plot")
         return _plot(
             which=which,
             toFile=toFile,
             path=path,
-            t=self._require_data("plot"),
+            t=self.t,
             Gt=self.Gt,
-            weights=self.weights,
             cont_result=self.continuous,
             disc_result=self.discrete,
         )
-
-    # ------------------------------------------------------------------
-    # Configuration helpers
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def from_toml(cls, path: str) -> "ReSpect":
-        """Construct a ReSpect solver from a TOML configuration file.
-
-        Parameters
-        ----------
-        path : str
-            Path to the TOML configuration file.
-
-        Returns
-        -------
-        ReSpect
-        """
-        return cls(ReSpectConfig.from_toml(path))
-
-    @classmethod
-    def from_yaml(cls, path: str) -> "ReSpect":
-        """Construct a ReSpect solver from a YAML configuration file.
-
-        Parameters
-        ----------
-        path : str
-            Path to the YAML configuration file.
-
-        Returns
-        -------
-        ReSpect
-        """
-        return cls(ReSpectConfig.from_yaml(path))
 
     # ------------------------------------------------------------------
     # Dunder helpers
     # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
-        fitted = self.continuous is not None
         return (
             f"ReSpect("
-            f"fitted={fitted}, "
+            f"fitted={self.continuous is not None}, "
             f"ns={self.config.ns}, "
             f"plateau={self.config.plateau}, "
             f"freq_end='{self.config.freq_end}')"
         )
 
     # ------------------------------------------------------------------
-    # Private helpers
+    # Internal helpers
     # ------------------------------------------------------------------
 
-    def _normalise_source(
-        self,
-        source: Union[str, np.ndarray, tuple],
-        Gt:     Optional[np.ndarray],
-    ) -> Union[str, tuple]:
-        """Normalise the source argument into str or (t, Gt) tuple.
-
-        Handles three calling conventions:
-            solver.fit("Gt.dat")
-            solver.fit(t, Gt)
-            solver.fit((t, Gt))
-        """
-        if isinstance(source, str):
-            return source
-        elif isinstance(source, tuple):
-            return source
-        elif isinstance(source, np.ndarray):
-            if Gt is None:
-                raise ReSpectError(
-                    "When source is a numpy array of time points, "
-                    "Gt must also be supplied as the second argument."
-                )
-            return (source, np.asarray(Gt, dtype=float))
-        else:
+    def _check_fitted(self, caller: str) -> None:
+        if self.continuous is None or self.discrete is None:
             raise ReSpectError(
-                "source must be a file path (str), a tuple (t, Gt), "
-                "or a numpy array of time points."
-            )
-
-    def _require_data(self, caller: str) -> np.ndarray:
-        """Return self.t or raise ReSpectError if fit() hasn't been called."""
-        if self.t is None:
-            raise ReSpectError(
-                f"Cannot call {caller}() before fit(). "
+                f"ReSpect.{caller}() called before fit(). "
                 "Run solver.fit(source) first."
             )
-        return self.t

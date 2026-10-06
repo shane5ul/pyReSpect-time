@@ -1,18 +1,27 @@
+"""
+pyrespect_time
+--------------
+Extract continuous and discrete relaxation spectra from time-domain
+G(t) data.
+
+Public API
+----------
+    from pyrespect_time import ReSpect, ReSpectConfig
+
+The public interface mirrors that of pyrespect_freq.
+"""
+
+from .config import ReSpectConfig, ReSpectError, ReSpectWarning
+from .continuous import ContinuousResult
+from .discrete import DiscreteResult
 from .solver import ReSpect
-from .config import ReSpectConfig, ReSpectError
 
-__all__ = ["ReSpect", "ReSpectConfig", "ReSpectError"]
-
-# from .config import ReSpectConfig, ReSpectWarning, ReSpectError
-# from .solver import ReSpect
-# from .continuous import ContinuousResult
-# from .discrete import DiscreteResult
-
-# __all__ = [
-#     "ReSpect",
-#     "ReSpectConfig",
-#     "ReSpectWarning",
-#     "ReSpectError",
-#     "ContinuousResult",
-#     "DiscreteResult",
-# ]
+__all__ = [
+    "ReSpect",
+    "ReSpectConfig",
+    "ReSpectError",
+    "ReSpectWarning",
+    "ContinuousResult",
+    "DiscreteResult",
+]
+__version__ = "2.1.0"

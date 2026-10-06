@@ -1,5 +1,5 @@
 """
-discrete.py — Discrete relaxation spectrum solver for pyReSpect.
+discrete.py — Discrete relaxation spectrum solver for pyReSpect-time.
 
 Given the continuous spectrum H(s) from fit_continuous(), extracts a
 discrete set of Maxwell modes {g_i, τ_i} that best represent the
@@ -16,6 +16,10 @@ Public API
 fit_discrete(t, Gt, weights, cont_result, config) -> DiscreteResult
 
 All other functions are private to this module.
+
+The structure of this module, the algorithm constants below, and the
+DiscreteResult fields are deliberately the same as in pyrespect_freq;
+only the kernel differs.
 """
 
 from __future__ import annotations
@@ -31,8 +35,25 @@ from scipy.optimize import nnls, least_squares, minimize
 
 from .config import ReSpectConfig, ReSpectWarning
 from .continuous import ContinuousResult
-from .kernels import get_kern_mat
 
+
+# ---------------------------------------------------------------------------
+# Algorithm constants (identical in pyrespect_time and pyrespect_freq)
+# ---------------------------------------------------------------------------
+
+#: Smallest number of modes considered in the AIC scan.
+_N_MIN = 2
+
+#: Modes with g_i / max(g) below this are dropped as negligible.
+_PRUNE_TOL = 1e-7
+
+#: Allowed range of τ relative to the data window, as (low, high):
+#: low * t_min <= τ <= high * t_max. Keeps modes from running away to
+#: where the data cannot constrain them.
+_TAU_WINDOW = (0.02, 50.0)
+
+#: Maximum number of passes of the merge-close-modes loop.
+_MAX_MERGE_TRIES = 3
 
 
 # ---------------------------------------------------------------------------
@@ -43,37 +64,64 @@ from .kernels import get_kern_mat
 class DiscreteResult:
     """Results from the discrete spectrum fit.
 
+    The field names are the same in pyrespect_time and pyrespect_freq.
+
     Attributes
     ----------
     g : np.ndarray, shape (N,)
         Maxwell mode weights g_i.
     tau : np.ndarray, shape (N,)
-        Maxwell relaxation times τ_i.
+        Maxwell relaxation times τ_i, in increasing order.
     dtau : np.ndarray, shape (N,)
-        Uncertainty estimates for τ_i. Entries are np.nan where the
-        NLLS fine-tuning step failed to converge.
-    N_opt : int
-        Optimal number of Maxwell modes.
+        Uncertainty estimates for τ_i. Entries are np.nan when the NLLS
+        fine-tuning step was not used.
+    N : int
+        Number of Maxwell modes returned (len(g)).
     G_fit : np.ndarray, shape (n,)
         Reconstructed G(t) from the discrete spectrum.
-    G0 : float or None
-        Plateau modulus. None if config.plateau is False.
+    G0 : float
+        Plateau modulus. 0.0 if config.plateau is False.
+    error : float
+        Weighted sum of squared relative residuals of the discrete fit.
     wt_base : np.ndarray
         Scanned base weight values w_b.
     AIC_bst : np.ndarray
         Best AIC value at each w_b.
     N_bst : np.ndarray
-        Best N (nominal) at each w_b.
+        Number of modes requested (the N that enters the AIC penalty)
+        at the best AIC for each w_b.
+    nz_N_bst : np.ndarray
+        Number of modes that survive pruning at the best AIC for each w_b.
     """
-    g:       np.ndarray
-    tau:     np.ndarray
-    dtau:    np.ndarray
-    N_opt:   int
-    G_fit:   np.ndarray
-    G0:      Optional[float]
-    wt_base: np.ndarray
-    AIC_bst: np.ndarray
-    N_bst:   np.ndarray
+    g:        np.ndarray
+    tau:      np.ndarray
+    dtau:     np.ndarray
+    N:        int
+    G_fit:    np.ndarray
+    G0:       float = 0.0
+    error:    float = 0.0
+
+    # AIC scan diagnostics, used by save/plot(which="full")
+    wt_base:  Optional[np.ndarray] = None
+    AIC_bst:  Optional[np.ndarray] = None
+    N_bst:    Optional[np.ndarray] = None
+    nz_N_bst: Optional[np.ndarray] = None
+
+    # -- deprecated name ------------------------------------------------
+    @property
+    def N_opt(self) -> int:
+        """Deprecated. Number of modes requested at the AIC optimum.
+
+        This is not the number of modes returned; use ``N`` for that.
+        """
+        warnings.warn(
+            "DiscreteResult.N_opt is deprecated: it is the number of modes "
+            "requested at the AIC optimum, not the number returned. Use N "
+            "(= len(g)) or N_bst[np.argmin(AIC_bst)].",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return int(self.N_bst[np.argmin(self.AIC_bst)])
 
 
 # ---------------------------------------------------------------------------
@@ -90,8 +138,12 @@ def fit_discrete(
     """Fit a discrete Maxwell spectrum to stress relaxation data.
 
     Uses the continuous spectrum from fit_continuous() to guide the
-    placement of discrete modes, then optimizes their number and
-    positions via AIC minimization and NLLS fine-tuning.
+    placement of discrete modes, selects their number by minimizing
+
+        AIC = 2 N + 2 C_error * error(N)
+
+    over a grid of base weights w_b, fine-tunes the τ positions by NLLS,
+    and merges modes that are too close (τ_{i+1}/τ_i < min_tau_spacing).
 
     Parameters
     ----------
@@ -102,7 +154,7 @@ def fit_discrete(
     weights : np.ndarray, shape (n,)
         Per-datapoint weights.
     cont_result : ContinuousResult
-        Output of fit_continuous(). Provides s, H, and optionally G0.
+        Output of fit_continuous(). Provides s, H, and G_fit.
     config : ReSpectConfig
         Configuration object.
 
@@ -110,134 +162,183 @@ def fit_discrete(
     -------
     DiscreteResult
     """
-    s = cont_result.s
-    H = cont_result.H
-    n = len(t)
+    s       = cont_result.s
+    H       = cont_result.H
+    plateau = config.plateau
 
     # ------------------------------------------------------------------
-    # Determine range of N to scan
+    # Range of N to scan
     # ------------------------------------------------------------------
-    log_t_range = np.log10(t[-1] / t[0])
-    N_min = int(max(np.floor(0.5 * log_t_range), 2))
-    N_max = int(min(np.floor(3.0 * log_t_range), n / 4))
-
-    if config.max_num_modes is not None:
-        N_max = min(N_max, config.max_num_modes)
-
-    if N_max > N_min:
-        Nv   = np.arange(N_min, N_max + 1, dtype=int)
-    else:
-        Nv   = np.arange(N_max, N_max + 1).astype(int)
-
+    Nv   = _mode_counts(np.max(t) / np.min(t), len(t), config.max_num_modes)
     npts = len(Nv)
 
     # ------------------------------------------------------------------
     # Estimate error weight from continuous curve fit (AIC criterion)
     # ------------------------------------------------------------------
-    kern_mat = get_kern_mat(s, t)
-    Gc       = cont_result.G_fit
-    C_error  = 1.0 / np.std(weights * (Gc / Gt - 1.0))
+    Gc      = cont_result.G_fit
+    C_error = 1.0 / np.std(weights * (Gc / Gt - 1.0))
 
     # ------------------------------------------------------------------
     # Scan base weight distributions
     # ------------------------------------------------------------------
-    delta = config.delta_base_weight_dist
-    wt_base = delta * np.arange(1, int(1.0 / delta))
+    delta    = config.delta_base_weight_dist
+    wt_base  = delta * np.arange(1, int(1.0 / delta))
 
-    n_wb   = len(wt_base)
-    AIC_bst = np.zeros(n_wb)
-    N_bst   = np.zeros(n_wb, dtype=int)
+    n_wb     = len(wt_base)
+    AIC_bst  = np.zeros(n_wb)
+    N_bst    = np.zeros(n_wb, dtype=int)
     nz_N_bst = np.zeros(n_wb, dtype=int)
 
     for ib, wb in enumerate(wt_base):
 
-        wt = _get_weights(H, t, s, wb)
-
-        ev   = np.zeros(npts)
+        wt    = _get_weights(H, t, s, wb)
+        ev    = np.zeros(npts)
         nz_Nv = np.zeros(npts, dtype=int)
 
         for i, N in enumerate(Nv):
-            z, _          = _grid_density(np.log(s), wt, N)
-            g, tau, ev[i], _ = _maxwell_modes(z, t, Gt, weights, config.plateau)
-            nz_Nv[i]      = len(g)
+            z, _             = _grid_density(np.log(s), wt, N)
+            _, tau, ev[i], _ = _maxwell_modes(z, t, Gt, weights, plateau)
+            nz_Nv[i]         = len(tau)
 
-        AIC            = 2.0 * Nv + 2.0 * C_error * ev
-        AIC_bst[ib]    = np.min(AIC)
-        N_bst[ib]      = Nv[np.argmin(AIC)]
-        nz_N_bst[ib]   = nz_Nv[np.argmin(AIC)]
+        AIC          = 2.0 * Nv + 2.0 * C_error * ev
+        AIC_bst[ib]  = np.min(AIC)
+        N_bst[ib]    = Nv[np.argmin(AIC)]
+        nz_N_bst[ib] = nz_Nv[np.argmin(AIC)]
 
     # ------------------------------------------------------------------
-    # Global optimum
+    # Global optimum: recompute, then fine-tune
     # ------------------------------------------------------------------
     i_best = np.argmin(AIC_bst)
-    N_opt  = int(N_bst[i_best])
-    wb_opt = wt_base[i_best]
+    wt     = _get_weights(H, t, s, wt_base[i_best])
+    z, _   = _grid_density(np.log(s), wt, int(N_bst[i_best]))
+
+    g, tau, _, _ = _maxwell_modes(z, t, Gt, weights, plateau)
+    dtau         = np.full(len(tau), np.nan)
+
+    ok, g_f, tau_f, dtau_f = _fine_tune(tau, t, Gt, weights, plateau)
+    if ok:
+        g, tau, dtau = g_f, tau_f, dtau_f
 
     # ------------------------------------------------------------------
-    # Recompute at optimum and fine-tune
+    # Merge modes that are too close
     # ------------------------------------------------------------------
-    wt          = _get_weights(H, t, s, wb_opt)
-    z, _        = _grid_density(np.log(s), wt, N_opt)
-    g, tau, _, _ = _maxwell_modes(z, t, Gt, weights, config.plateau)
-    g, tau, dtau = _fine_tune(tau, t, Gt, weights, config.plateau,
-                               estimate_error=True)
+    itry = 0
+    while len(tau) > 1 and itry < _MAX_MERGE_TRIES:
+        tau_spacing = tau[1:] / tau[:-1]
+        if np.min(tau_spacing) >= config.min_tau_spacing:
+            break
 
-    # sort modes
-    indx = np.argsort(tau)
-    tau  = tau[indx]
-    if config.plateau:
-        g[:-1] = g[indx]
-    else:
-        g = g[indx]
+        tau_m = _merge_modes(g, tau, int(np.argmin(tau_spacing)))
 
-    # ------------------------------------------------------------------
-    # Merge modes that are too close if N > 1
-    # ------------------------------------------------------------------
-    if len(tau) > 1:
-        tau_spacing  = tau[1:] / tau[:-1]
-        itry         = 0
+        ok, g_f, tau_f, dtau_f = _fine_tune(tau_m, t, Gt, weights, plateau)
+        if ok:
+            g, tau, dtau = g_f, tau_f, dtau_f
+        else:
+            g, tau, _, _ = _maxwell_modes(np.log(tau_m), t, Gt, weights, plateau)
+            dtau         = np.full(len(tau), np.nan)
 
-        while np.min(tau_spacing) < config.min_tau_spacing and itry < 3:
-            imode        = np.argmin(tau_spacing)
-            tau          = _merge_modes(g, tau, imode)
-            g, tau, dtau = _fine_tune(tau, t, Gt, weights, config.plateau,
-                                       estimate_error=True)
-            if len(tau) > 1:
-                tau_spacing = tau[1:] / tau[:-1]
-            else:
-                break
-            itry += 1
+        itry += 1
 
     # ------------------------------------------------------------------
     # Extract G0 and compute G_fit
     # ------------------------------------------------------------------
-    G0 = None
-    if config.plateau:
+    G0 = 0.0
+    if plateau:
         G0 = float(g[-1])
         g  = g[:-1]
 
-    S, T  = np.meshgrid(tau, t)
-    K     = np.exp(-T / S)
-    G_fit = K @ g
-    if G0 is not None:
-        G_fit = G_fit + G0
+    G_fit = _maxwell_kernel(tau, t) @ g + G0
+    error = float(np.sum((weights * (G_fit / Gt - 1.0)) ** 2))
 
     return DiscreteResult(
         g=g,
         tau=tau,
         dtau=dtau,
-        N_opt=N_opt,
+        N=len(g),
         G_fit=G_fit,
         G0=G0,
+        error=error,
         wt_base=wt_base,
         AIC_bst=AIC_bst,
         N_bst=N_bst,
+        nz_N_bst=nz_N_bst,
     )
 
 
 # ---------------------------------------------------------------------------
-# Private functions
+# Private: kernel (the only domain-specific part of this module)
 # ---------------------------------------------------------------------------
+
+def _maxwell_kernel(tau: np.ndarray, t: np.ndarray) -> np.ndarray:
+    """Maxwell kernel exp(-t_i/τ_j), shape (n, N)."""
+    S, T = np.meshgrid(tau, t)
+    return np.exp(-T / S)
+
+
+def _design_matrix(tau: np.ndarray, t: np.ndarray, plateau: bool) -> np.ndarray:
+    """Kernel with an extra column of ones for G0 when plateau=True."""
+    K = _maxwell_kernel(tau, t)
+    if plateau:
+        K = np.hstack((K, np.ones((len(t), 1))))
+    return K
+
+
+def _model(t: np.ndarray, tau: np.ndarray, g: np.ndarray, plateau: bool) -> np.ndarray:
+    """Model prediction for modes (g, tau); G0 is g[-1] when plateau=True."""
+    if not plateau:
+        return _maxwell_kernel(tau, t) @ g
+    G = _maxwell_kernel(tau, t) @ g[:-1]
+    G = G + g[-1]
+    return G
+
+
+def _tau_bounds(t: np.ndarray) -> tuple[float, float]:
+    """Allowed range of τ for the given data window."""
+    return _TAU_WINDOW[0] * np.min(t), _TAU_WINDOW[1] * np.max(t)
+
+
+# ---------------------------------------------------------------------------
+# Private: algorithm
+# ---------------------------------------------------------------------------
+
+def _mode_counts(
+    span:          float,
+    n:             int,
+    max_num_modes: Optional[int],
+) -> np.ndarray:
+    """Values of N scanned by the AIC search.
+
+    Parameters
+    ----------
+    span : float
+        Ratio of the largest to the smallest abscissa of the data.
+    n : int
+        Number of data abscissae.
+    max_num_modes : int or None
+        User cap on N.
+
+    Returns
+    -------
+    Nv : np.ndarray of int
+    """
+    decades = np.log10(span)
+    N_min   = int(max(np.floor(0.5 * decades), _N_MIN))
+    N_max   = int(min(np.floor(3.0 * decades), n / 4))
+
+    if max_num_modes is not None:
+        N_max = min(N_max, max_num_modes)
+
+    if N_max > N_min:
+        return np.arange(N_min, N_max + 1, dtype=int)
+
+    warnings.warn(
+        f"Only N = {N_max} is scanned for the discrete spectrum; "
+        "make sure max_num_modes is set prudently.",
+        ReSpectWarning,
+        stacklevel=4,
+    )
+    return np.arange(N_max, N_max + 1, dtype=int)
+
 
 def _nn_lls(
     t:        np.ndarray,
@@ -245,7 +346,7 @@ def _nn_lls(
     Gexp:     np.ndarray,
     wexp:     np.ndarray,
     plateau:  bool,
-) -> tuple[np.ndarray, float, float]:
+) -> tuple[np.ndarray, float]:
     """Solve the non-negative least squares problem for Maxwell weights.
 
     Minimizes || w * (K g / G_exp - 1) ||^2 subject to g >= 0.
@@ -257,7 +358,7 @@ def _nn_lls(
     Gexp : np.ndarray, shape (n,)
     wexp : np.ndarray, shape (n,)
     plateau : bool
-        If True, appends a column of ones to K to fit G0.
+        If True, G0 is fitted as an extra, last element of g.
 
     Returns
     -------
@@ -265,24 +366,16 @@ def _nn_lls(
         Non-negative weights (and G0 as last element if plateau=True).
     error : float
         Weighted residual sum of squares.
-    cond_Kp : float
-        Condition number of the weighted kernel matrix.
     """
-    S, T = np.meshgrid(tau, t)
-    K    = np.exp(-T / S)                        # (n, N)
-
-    if plateau:
-        K = np.hstack((K, np.ones((len(Gexp), 1))))
+    K  = _design_matrix(tau, t, plateau)
 
     # Weight the system: minimizes w*(Kg/Gexp - 1)^2
-    Kp      = (wexp / Gexp).reshape(-1, 1) * K
-    cond_Kp = np.linalg.cond(Kp)
-    g       = nnls(Kp, wexp, maxiter=100000)[0]
+    Kp = (wexp / Gexp).reshape(-1, 1) * K
+    g  = nnls(Kp, wexp, maxiter=100000)[0]
 
-    G_model = K @ g
-    error   = float(np.sum((wexp * (G_model / Gexp - 1.0)) ** 2))
+    error = float(np.sum((wexp * (K @ g / Gexp - 1.0)) ** 2))
 
-    return g, error, cond_Kp
+    return g, error
 
 
 def _maxwell_modes(
@@ -291,10 +384,12 @@ def _maxwell_modes(
     Gexp:    np.ndarray,
     wexp:    np.ndarray,
     plateau: bool,
-) -> tuple[np.ndarray, np.ndarray, float, float]:
+) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]:
     """Solve for Maxwell modes at log-spaced positions z = log(τ).
 
-    Solves NNLS and prunes negligibly small modes (g_i / max(g) < 1e-7).
+    Solves NNLS, then drops modes outside the allowed τ window and modes
+    with negligible weight (g_i / max(g) < _PRUNE_TOL), and sorts the
+    rest by τ.
 
     Parameters
     ----------
@@ -308,21 +403,31 @@ def _maxwell_modes(
     Returns
     -------
     g : np.ndarray
+        Weights of the surviving modes (G0 appended if plateau=True).
     tau : np.ndarray
+        Relaxation times of the surviving modes, increasing.
     error : float
-    cond_Kp : float
+        Weighted residual sum of squares of the NNLS solution.
+    keep : np.ndarray of int
+        Indices into z of the surviving modes, in the order returned.
     """
-    tau              = np.exp(z)
-    g, error, cond_Kp = _nn_lls(t, tau, Gexp, wexp, plateau)
+    tau      = np.exp(z)
+    g, error = _nn_lls(t, tau, Gexp, wexp, plateau)
 
-    # Prune negligibly small modes
-    g_body = g[:-1] if plateau else g
-    i_zero = np.where(g_body / np.max(g_body) < 1e-7)[0]
+    g_modes  = g[:-1] if plateau else g
+    lo, hi   = _tau_bounds(t)
 
-    tau = np.delete(tau, i_zero)
-    g   = np.delete(g,   i_zero)
+    in_window = (tau >= lo) & (tau <= hi)
+    keep      = np.where(in_window)[0]
+    g_ref     = np.max(g_modes[keep]) if len(keep) else 1.0
+    keep      = keep[g_modes[keep] / g_ref >= _PRUNE_TOL]
+    keep      = keep[np.argsort(tau[keep])]
 
-    return g, tau, error, cond_Kp
+    g_out = g_modes[keep]
+    if plateau:
+        g_out = np.append(g_out, g[-1])
+
+    return g_out, tau[keep], error, keep
 
 
 def _get_weights(
@@ -351,7 +456,6 @@ def _get_weights(
         Normalized weights for mode placement.
     """
     ns = len(s)
-    n  = len(t)
 
     # Trapezoidal weights in log-space
     hs        = np.zeros(ns)
@@ -359,11 +463,10 @@ def _get_weights(
     hs[-1]    = 0.5 * np.log(s[-1] / s[-2])
     hs[1:-1]  = 0.5 * (np.log(s[2:]) - np.log(s[:-2]))
 
-    S, T = np.meshgrid(s, t)
-    kern = np.exp(-T / S)                        # (n, ns)
+    kern = _maxwell_kernel(s, t)                  # (n, ns)
 
     # Contribution of each (t_i, s_j) pair, weighted by H
-    wij = kern * (hs * np.exp(H)).reshape(1, ns) # (n, ns)
+    wij = kern * (hs * np.exp(H)).reshape(1, ns)  # (n, ns)
     K   = wij.sum(axis=1)                         # (n,)  = G(t_i)
 
     # Normalize rows so each row sums to 1
@@ -396,7 +499,7 @@ def _grid_density(
     px : np.ndarray
         Density or probability distribution (positive, need not be normalized).
     N : int
-        Number of output points (>= 3).
+        Number of output points.
 
     Returns
     -------
@@ -457,47 +560,41 @@ def _merge_modes(
     tau_new : np.ndarray
         Updated relaxation times with one fewer mode.
     """
+    g1, tau1 = g[imode],     tau[imode]
+    g2, tau2 = g[imode + 1], tau[imode + 1]
+
+    def _integrand(t: float, gn: float, taun: float) -> float:
+        Gn = gn * np.exp(-t / taun)
+        Go = g1 * np.exp(-t / tau1) + g2 * np.exp(-t / tau2)
+        return (Gn / Go - 1.0) ** 2
 
     def _cost(par: np.ndarray) -> float:
         """Integrated squared relative error between merged and original."""
-        gn, taun = par[0], par[1]
-        g1, tau1 = g[imode],     tau[imode]
-        g2, tau2 = g[imode + 1], tau[imode + 1]
-
         tmin = min(tau1, tau2) / 10.0
         tmax = max(tau1, tau2) * 10.0
+        return quad(_integrand, tmin, tmax, args=(par[0], par[1]))[0]
 
-        def _integrand(t: float) -> float:
-            Gn = gn * np.exp(-t / taun)
-            Go = g1 * np.exp(-t / tau1) + g2 * np.exp(-t / tau2)
-            return (Gn / Go - 1.0) ** 2
+    res = minimize(_cost, np.array([g1 + g2, 0.5 * (tau1 + tau2)]))
 
-        return quad(_integrand, tmin, tmax)[0]
-
-    ini_guess = np.array([
-        g[imode] + g[imode + 1],
-        0.5 * (tau[imode] + tau[imode + 1]),
-    ])
-    res = minimize(_cost, ini_guess)
-
-    tau_new         = np.delete(tau, imode + 1)
-    tau_new[imode]  = res.x[1]
+    tau_new        = np.delete(tau, imode + 1)
+    tau_new[imode] = res.x[1]
 
     return tau_new
 
 
 def _fine_tune(
-    tau:            np.ndarray,
-    t:              np.ndarray,
-    Gexp:           np.ndarray,
-    wexp:           np.ndarray,
-    plateau:        bool,
-    estimate_error: bool = False,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    tau:     np.ndarray,
+    t:       np.ndarray,
+    Gexp:    np.ndarray,
+    wexp:    np.ndarray,
+    plateau: bool,
+) -> tuple[bool, np.ndarray, np.ndarray, np.ndarray]:
     """Fine-tune mode positions via non-linear least squares.
 
-    Attempts NLLS optimization of τ positions. If it fails, returns
-    the input τ unchanged and fills dtau with np.nan.
+    Refines the τ positions by NLLS (weights g are re-solved by NNLS at
+    every step), keeping τ inside the allowed window. The refinement is
+    reported as successful only if it converges and does not make the
+    fit worse than the starting point.
 
     Parameters
     ----------
@@ -507,70 +604,42 @@ def _fine_tune(
     Gexp : np.ndarray, shape (n,)
     wexp : np.ndarray, shape (n,)
     plateau : bool
-    estimate_error : bool
-        If True, estimate uncertainties dtau from the NLLS Jacobian.
 
     Returns
     -------
+    success : bool
+        If False, the caller should keep its starting solution.
     g : np.ndarray
+        Weights at the refined positions (G0 appended if plateau=True).
     tau : np.ndarray
+        Refined relaxation times, increasing.
     dtau : np.ndarray
-        Uncertainty estimates; np.nan entries where estimation failed.
+        Uncertainty estimates for tau from the NLLS Jacobian.
     """
 
-    def _residuals(
-        tau_: np.ndarray,
-        texp: np.ndarray,
-        Gexp_: np.ndarray,
-        wexp_: np.ndarray,
-        plateau_: bool,
-    ) -> np.ndarray:
-        g_, _, _ = _nn_lls(texp, tau_, Gexp_, wexp_, plateau_)
-        S, T     = np.meshgrid(tau_, texp)
-        G_model  = np.exp(-T / S) @ (g_[:-1] if plateau_ else g_)
-        if plateau_:
-            G_model = G_model + g_[-1]
-        return wexp_ * (G_model / Gexp_ - 1.0)
+    def _residuals(tau_: np.ndarray) -> np.ndarray:
+        g_, _ = _nn_lls(t, tau_, Gexp, wexp, plateau)
+        return wexp * (_model(t, tau_, g_, plateau) / Gexp - 1.0)
 
-    nlls_success = False
-    dtau         = np.full(len(tau), np.nan)
+    init_error = np.linalg.norm(_residuals(tau))
 
     try:
-        res  = least_squares(
-            _residuals, tau,
-            bounds=(0.0, np.inf),
-            args=(t, Gexp, wexp, plateau),
-        )
-        tau  = res.x
-        tau0 = tau.copy()
-
-        if estimate_error:
-            J    = res.jac
-            cov  = np.linalg.pinv(J.T @ J) * (res.fun ** 2).mean()
-            dtau = np.sqrt(np.diag(cov))
-
-        nlls_success = True
-
+        res  = least_squares(_residuals, tau, bounds=_tau_bounds(t))
+        cov  = np.linalg.pinv(res.jac.T @ res.jac) * (res.fun ** 2).mean()
+        dtau = np.sqrt(np.diag(cov))
     except Exception:
         warnings.warn(
-            "NLLS fine-tuning did not converge; returning NNLS solution. "
-            "Uncertainty estimates (dtau) will be NaN in the output.",
+            "NLLS fine-tuning of the discrete modes did not converge; "
+            "keeping the NNLS solution. Uncertainty estimates (dtau) "
+            "will be NaN.",
             ReSpectWarning,
             stacklevel=2,
         )
+        g, tau, _, _ = _maxwell_modes(np.log(tau), t, Gexp, wexp, plateau)
+        return False, g, tau, np.full(len(tau), np.nan)
 
-    # Re-solve NNLS at the (possibly updated) tau positions
-    g, tau, _, _ = _maxwell_modes(np.log(tau), t, Gexp, wexp, plateau)
+    # Re-solve NNLS at the refined positions; modes may drop out
+    g, tau, _, keep = _maxwell_modes(np.log(res.x), t, Gexp, wexp, plateau)
+    final_error     = np.linalg.norm(_residuals(tau))
 
-    # If a mode dropped out during NNLS, remove its dtau entry too
-    if nlls_success and estimate_error and len(tau) < len(tau0):
-        n_kill = 0
-        for i in range(len(tau0)):
-            if np.min(np.abs(tau0[i] - tau)) > 1e-12 * tau0[i]:
-                dtau   = np.delete(dtau, i - n_kill)
-                n_kill += 1
-
-    if not nlls_success:
-        dtau = np.full(len(tau), np.nan)
-
-    return g, tau, dtau
+    return bool(final_error <= init_error), g, tau, dtau[keep]

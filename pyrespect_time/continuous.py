@@ -36,18 +36,20 @@ from .kernels import get_kern_mat, kernel_prestore, kernel_D
 class ContinuousResult:
     """Results from the continuous spectrum fit.
 
+    The field names are the same in pyrespect_time and pyrespect_freq.
+
     Attributes
     ----------
     s : np.ndarray, shape (ns,)
         Relaxation mode axis.
     H : np.ndarray, shape (ns,)
-        Log relaxation spectrum H(s).
-    lam_C : float
-        Regularization parameter λ used for the final fit.
+        Log relaxation spectrum H(s); the spectrum itself is exp(H).
     G_fit : np.ndarray, shape (n,)
         Reconstructed G(t) from the continuous spectrum.
-    G0 : float or None
-        Plateau modulus. None if config.plateau is False.
+    G0 : float
+        Plateau modulus. 0.0 if config.plateau is False.
+    lam_C : float
+        Regularization parameter λ used for the final fit.
     lam : np.ndarray or None
         Array of λ values scanned on the L-curve.
         None if lam_C was pre-specified in config.
@@ -58,19 +60,25 @@ class ContinuousResult:
     log_P : np.ndarray or None
         Normalized log-probability log p(λ) at each λ.
         None if lam_C was pre-specified.
+    dH : np.ndarray or None, shape (ns,)
+        Error band on H: spread of H over the plausible range of λ.
+        None if lam_C was pre-specified.
+    H_lam : np.ndarray or None, shape (ns, n_lam)
+        H snapshots at each scanned λ. None if lam_C was pre-specified.
     """
     s:      np.ndarray
     H:      np.ndarray
-    lam_C:  float
     G_fit:  np.ndarray
-    G0:     Optional[float]
+    G0:     float = 0.0
+    lam_C:  float = 0.0
 
     # L-curve diagnostics — None when lam_C is pre-specified
-    lam:    Optional[np.ndarray]
-    rho:    Optional[np.ndarray]
-    eta:    Optional[np.ndarray]
-    log_P:  Optional[np.ndarray]
-    H_lam:  Optional[np.ndarray]  # shape (ns, n_lam); H snapshots at each λ
+    lam:    Optional[np.ndarray] = None
+    rho:    Optional[np.ndarray] = None
+    eta:    Optional[np.ndarray] = None
+    log_P:  Optional[np.ndarray] = None
+    dH:     Optional[np.ndarray] = None
+    H_lam:  Optional[np.ndarray] = None
 
 
 # ---------------------------------------------------------------------------
@@ -136,14 +144,14 @@ def fit_continuous(
     # Determine λ
     # ------------------------------------------------------------------
     if config.lam_C is None:
-        lam_C, lam, rho, eta, log_P, H_lam = _lcurve(
+        lam_C, lam, rho, eta, log_P, dH, H_lam = _lcurve(
             Gt, weights, H, kern_mat, config, G0
         )
         # Update H (and G0) at the optimal λ
         H, G0 = _get_H(lam_C, Gt, weights, H, kern_mat, config.plateau, G0)
     else:
         lam_C                        = config.lam_C
-        lam = rho = eta = log_P = H_lam = None
+        lam = rho = eta = log_P = dH = H_lam = None
         H, G0 = _get_H(lam_C, Gt, weights, H, kern_mat, config.plateau, G0)
 
     # ------------------------------------------------------------------
@@ -154,13 +162,14 @@ def fit_continuous(
     return ContinuousResult(
         s=s,
         H=H,
-        lam_C=lam_C,
         G_fit=G_fit,
-        G0=G0,
+        G0=0.0 if G0 is None else float(G0),
+        lam_C=float(lam_C),
         lam=lam,
         rho=rho,
         eta=eta,
         log_P=log_P,
+        dH=dH,
         H_lam=H_lam,
     )
 
@@ -425,7 +434,8 @@ def _lcurve(
     kern_mat: np.ndarray,
     config:   ReSpectConfig,
     G0:       Optional[float],
-) -> tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+           np.ndarray, np.ndarray]:
     """Scan λ and determine the optimal regularization parameter λ_M.
 
     Uses a Bayesian formulation: computes log p(λ) at each grid point
@@ -455,6 +465,8 @@ def _lcurve(
         Roughness norms at each λ.
     log_P : np.ndarray
         Normalized log p(λ) at each λ.
+    dH : np.ndarray, shape (ns,)
+        Error band on H (see _error_band).
     H_lam : np.ndarray, shape (ns, n_lam)
         H snapshots at each λ (truncated to significant range).
     """
@@ -533,4 +545,45 @@ def _lcurve(
             + config.SmFacLam * (np.log(lam_M) - np.min(np.log(lam_grid)))
         )
 
-    return lam_M, lam_grid, rho, eta, log_P, H_lam
+    dH = _error_band(H_lam, p_lam)
+
+    return lam_M, lam_grid, rho, eta, log_P, dH, H_lam
+
+
+def _error_band(H_lam: np.ndarray, p_lam: np.ndarray) -> np.ndarray:
+    """Error band on H: its spread over the plausible range of λ.
+
+    Standard deviation of the H_λ snapshots over all grid points with
+    p(λ) > 0.1. If the λ grid is so fine that no single point carries
+    that much probability (large lam_density), the p(λ)-weighted standard
+    deviation over all scanned points is used instead.
+
+    Parameters
+    ----------
+    H_lam : np.ndarray, shape (ns, n_lam)
+        H snapshots at each scanned λ.
+    p_lam : np.ndarray, shape (n_lam,)
+        Normalized probability of each λ (sums to 1).
+
+    Returns
+    -------
+    dH : np.ndarray, shape (ns,)
+    """
+    ns  = H_lam.shape[0]
+    Hm  = np.zeros(ns)
+    Hm2 = np.zeros(ns)
+    cnt = 0
+    for i in range(len(p_lam)):
+        if p_lam[i] > 0.1:
+            Hm  += H_lam[:, i]
+            Hm2 += H_lam[:, i] ** 2
+            cnt += 1
+
+    if cnt > 0:
+        Hm  = Hm / cnt
+        Hm2 = Hm2 / cnt
+    else:
+        Hm  = H_lam @ p_lam
+        Hm2 = (H_lam ** 2) @ p_lam
+
+    return np.sqrt(np.maximum(Hm2 - Hm ** 2, 0.0))

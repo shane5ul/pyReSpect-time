@@ -112,13 +112,15 @@ class ReSpectConfig:
         Smaller values give a finer AIC search. Default: 0.2.
     min_tau_spacing : float
         Minimum ratio τ_{i+1}/τ_i below which adjacent modes are merged.
-        Must be > 1.0. Default: 1.5.
+        Must be > 1.0. Default: 1.25.
     resample : bool
-        Should I resample raw data by linear interpolation on log-grid?
-        Useful when #datapoints is too large or unevenly dispersed Default: True.
+        Whether to resample the input data onto a geometric grid by linear
+        interpolation. Useful when the data are very dense or unevenly
+        spaced. Data supplied with weights are never resampled. Can be
+        overridden per call with ``fit(..., resample=...)``. Default: True.
     n_resample : int
         Number of points used when resampling input data onto a geometric
-        grid (2-column input only). Default: 100.
+        grid. Default: 100.
     """
 
     # Continuous spectrum
@@ -280,11 +282,12 @@ class ReSpectConfig:
             SmFacLam    = 0.0
 
             [discrete]
-            max_num_modes          = null
+            # max_num_modes        = 8      (omit the key for "no cap")
             delta_base_weight_dist = 0.2
-            min_tau_spacing        = 1.5
+            min_tau_spacing        = 1.25
 
             [io]
+            resample   = true
             n_resample = 100
         """
         if tomllib is None:

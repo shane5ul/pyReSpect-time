@@ -1,0 +1,25 @@
+# pyrespect_time configuration file
+#
+# Every key is optional; the values below are the defaults.
+# Load with:  solver = ReSpect.from_toml("inp.toml")
+
+[spectrum]
+ns       = 100
+plateau  = false
+freq_end = "lenient"
+
+[regularization]
+lam_min     = 1e-10
+lam_max     = 1e3
+SmFacLam    = 0.0
+lam_density = 2
+# lam_C     = 1e-2     # uncomment to fix lambda and skip the L-curve
+
+[discrete]
+delta_base_weight_dist = 0.2
+min_tau_spacing        = 1.25
+# max_num_modes        = 8     # uncomment to cap the number of modes
+
+[io]
+resample   = true
+n_resample = 100
